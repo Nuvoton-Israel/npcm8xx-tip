@@ -34,6 +34,9 @@
 	set(TIP_SRC_DIR ${TIP_DIR}/src)
 	set(TIP_NPCM850_DIR ${TIP_DIR}/npcm850)
 	set(TIP_FREE_RTOS_DIR ${TIP_NPCM850_DIR}/freertos)
+	set(COMPOSITE_EAT_DIR ${TIP_COMMON_DIR}/composite_eat)
+
+	option(TIP_COMPOSITE_ATTESTATION "Enable TIP Composite EAT generation" OFF)
 
 	# This flag is added to avoid build utilizing linker generated dependencies.
 	# This is needed for mitigating this issue:
@@ -185,6 +188,33 @@
 		${TIP_NPCM850_DIR}/L1/tip_cerberus.c
 		${GCC_DIR}/platform_compiler.c
 		)
+
+	if(TIP_COMPOSITE_ATTESTATION)
+		target_sources(
+			${TARGET_NAME}
+			PRIVATE
+				${COMPOSITE_EAT_DIR}/composite_eat_codec.c
+				${COMPOSITE_EAT_DIR}/composite_eat_generator.c
+				${COMPOSITE_EAT_DIR}/qcbor/src/UsefulBuf.c
+				${COMPOSITE_EAT_DIR}/qcbor/src/qcbor_decode.c
+				${COMPOSITE_EAT_DIR}/qcbor/src/qcbor_encode.c
+			)
+		target_include_directories(
+			${TARGET_NAME}
+			PRIVATE
+				${COMPOSITE_EAT_DIR}/qcbor/inc
+				${COMPOSITE_EAT_DIR}/qcbor/inc/qcbor
+			)
+		target_compile_definitions(
+			${TARGET_NAME}
+			PRIVATE
+				COMPOSITE_EAT
+				BMC_DIRECT_COMPOSITE_EAT
+				QCBOR_DISABLE_PREFERRED_FLOAT
+				QCBOR_DISABLE_FLOAT_HW_USE
+				USEFULBUF_DISABLE_ALL_FLOAT
+			)
+	endif()
 	set(DUMMY_OTP_VALUE 0 CACHE STRING "default 0 for DUMMY_OTP_VALUE")
 	target_compile_definitions(${TARGET_NAME} PRIVATE TIP_DUMMY_OTP_ON_RAM=${DUMMY_OTP_VALUE})
 	message(STATUS "TIP DUMMY_OTP_VALUE: ${DUMMY_OTP_VALUE}")

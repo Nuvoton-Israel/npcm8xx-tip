@@ -138,6 +138,7 @@ void add_all_platform_tests (CuSuite *suite)
 {
 	add_all_linux_tests (suite);
 	TESTING_RUN_SUITE (composite_eat_codec);
+	TESTING_RUN_SUITE (composite_eat_generator);
 }
 
 

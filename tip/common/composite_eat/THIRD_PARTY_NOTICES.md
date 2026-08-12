@@ -20,6 +20,7 @@ The files under `qcbor/` are an unmodified subset of the upstream commit:
 - `inc/qcbor/qcbor_private.h`
 - `inc/qcbor/qcbor_spiffy_decode.h`
 - `src/UsefulBuf.c`
+- `src/ieee754.h`
 - `src/qcbor_decode.c`
 - `src/qcbor_encode.c`
 

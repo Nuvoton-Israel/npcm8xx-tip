@@ -41,10 +41,12 @@ file(GLOB_RECURSE TESTING_SOURCES "${TESTING_DIR}/*.c")
 
 set(COMPOSITE_EAT_SOURCES
 	${COMPOSITE_EAT_DIR}/composite_eat_codec.c
+	${COMPOSITE_EAT_DIR}/composite_eat_generator.c
 	${COMPOSITE_EAT_DIR}/qcbor/src/UsefulBuf.c
 	${COMPOSITE_EAT_DIR}/qcbor/src/qcbor_decode.c
 	${COMPOSITE_EAT_DIR}/qcbor/src/qcbor_encode.c
 	${COMPOSITE_EAT_DIR}/testing/composite_eat_codec_test.c
+	${COMPOSITE_EAT_DIR}/testing/composite_eat_generator_test.c
 	)
 
 find_package(Threads REQUIRED)

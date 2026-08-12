@@ -13,6 +13,9 @@
 #include "system/system.h"
 #include "task.h"
 #include "tip_firmware_component.h"
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+#include "composite_eat/composite_eat_generator.h"
+#endif
 
 #define BMC_RESET_CMD    0x00
 #ifdef BMC_DIRECT
@@ -103,6 +106,10 @@ int tip_load_bmc_firmware (struct bmc_task *task, struct spi_flash *flash,
 	uint32_t *combo1_start_addr);
 uint8_t *bmc_component_get_digest_buf (IMG_TYPE_E img);
 void bmc_export_data (void);
+
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+void bmc_direct_composite_eat_configure (struct composite_eat_generator *generator);
+#endif
 
 
 #endif /* _BMC_TASK_H_ */

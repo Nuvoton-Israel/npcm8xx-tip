@@ -1,6 +1,6 @@
 /*---------------------------------------------------------------------------------------------------------*/
-/*  Copyright (c) 2026 by Nuvoton Technology Corporation.                                                       */
-/*  SPDX-License-Identifier: Apache-2.0                                                                                              */
+/*  Copyright (c) 2026 by Nuvoton Technology Corporation. */
+/*  SPDX-License-Identifier: Apache-2.0 */
 /*<<<---------------------------------------------------------------------------------------------------*/
 
 #include <stdlib.h>
@@ -37,6 +37,11 @@
 #ifdef BMC_DIRECT
 #include "tip_rng_ncl.h"
 #include "tip_aes_ncl.h"
+#endif
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+#include "composite_eat/bmc_direct_composite_eat_abi.h"
+#include "composite_eat/bmc_direct_composite_eat_state.h"
+#include "composite_eat/composite_eat_generator.h"
 #endif
 
 /**
@@ -110,7 +115,7 @@ extern struct spi_flash *active_flash;
 /**
  * Reset counter
  */
-static uint8_t reset_counter [RST_MAX];
+static uint8_t reset_counter[RST_MAX];
 
 /**
  * handler to regular mailbox
@@ -128,6 +133,11 @@ extern struct tip_fw_update_task cerberus_update;
 extern struct tip_hash_ncl_engine system_hash;
 
 extern struct tip_rom_ncl_shared_state *ncl_shared_state;
+
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+static struct bmc_direct_composite_eat_state composite_eat_state;
+static struct composite_eat_generator *composite_eat_generator;
+#endif
 
 /**
  * Hardware ECC engine.
@@ -203,6 +213,11 @@ void NVIC_BMC_reset (uint16_t num)
 
 	tip_bmc_tim_disable_all_wd ();
 
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+	bmc_direct_composite_eat_reset (&composite_eat_state);
+	NVIC_EnableInt (NVIC_INT_2, FALSE);
+#endif
+
 	/* interrupt will be reenabled after BMC is reloaded in bmc_task */
 	NVIC_EnableInt (NVIC_INT_46, FALSE);
 
@@ -222,7 +237,7 @@ void NVIC_BMC_reset (uint16_t num)
 #ifdef BMC_DIRECT
 static void tip_bmc_direct_finalize_command (int status, UINT32 notification)
 {
-	if (ROT_IS_ERROR(status) == false) {
+	if (ROT_IS_ERROR (status) == false) {
 		status = 0;
 	}
 	platform_printf_dbg ("Done status=%#010lx" NEWLINE, status);
@@ -248,6 +263,76 @@ static void tip_bmc_direct_finalize_command (int status, UINT32 notification)
 	/* notify BMC on complition */
 	tip_mbx_notify_to_bmc (notification);
 }
+#endif
+
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+void bmc_direct_composite_eat_configure (struct composite_eat_generator *generator)
+{
+	composite_eat_generator = generator;
+	bmc_direct_composite_eat_reset (&composite_eat_state);
+	tip_mbx_clear_notification (BMC_DIRECT_NOTIFICATION_COMPOSITE_EAT);
+	NVIC_ClearInt (NVIC_INT_2);
+	NVIC_EnableInt (NVIC_INT_2, TRUE);
+}
+
+static void bmc_direct_composite_eat_write_scratchpad (void *context, uint32_t index,
+	uint32_t value)
+{
+	(void) context;
+	REG_WRITE (SCRPAD_10_41 (index), value);
+}
+
+static void bmc_direct_composite_eat_memory_barrier (void *context)
+{
+	(void) context;
+	__asm volatile("dmb" ::: "memory");
+}
+
+static void bmc_direct_composite_eat_clear_notification (void *context, uint32_t notification)
+{
+	(void) context;
+	tip_mbx_clear_notification (notification);
+}
+
+static void bmc_direct_composite_eat_notify_bmc (void *context, uint32_t notification)
+{
+	(void) context;
+	tip_mbx_notify_to_bmc (notification);
+}
+
+static const struct bmc_direct_composite_eat_publication_ops composite_eat_publication_ops = {
+	.write_scratchpad = bmc_direct_composite_eat_write_scratchpad,
+	.memory_barrier = bmc_direct_composite_eat_memory_barrier,
+	.clear_notification = bmc_direct_composite_eat_clear_notification,
+	.notify_bmc = bmc_direct_composite_eat_notify_bmc,
+};
+
+static void bmc_direct_composite_eat_publish (enum bmc_direct_composite_eat_status status,
+	uint32_t response_length, uint32_t request_id)
+{
+	(void) bmc_direct_composite_eat_publish_response (&composite_eat_publication_ops, NULL, status,
+		response_length, request_id);
+}
+
+static bool bmc_direct_composite_eat_finish (enum bmc_direct_composite_eat_status status,
+	uint32_t response_length, const struct bmc_direct_composite_eat_request *request)
+{
+	DISABLE_INTERRUPTS ();
+	if (!bmc_direct_composite_eat_request_current (&composite_eat_state, request)) {
+		ENABLE_INTERRUPTS ();
+		return false;
+	}
+
+	bmc_direct_composite_eat_publish (status, response_length, request->id);
+	bmc_direct_composite_eat_complete (&composite_eat_state);
+	NVIC_ClearInt (NVIC_INT_2);
+	NVIC_EnableInt (NVIC_INT_2, TRUE);
+	ENABLE_INTERRUPTS ();
+	return true;
+}
+#endif
+
+#if defined(BMC_DIRECT) || defined(BMC_DIRECT_COMPOSITE_EAT)
 
 void NVIC_BMC_direct_handler (uint16_t num)
 {
@@ -272,6 +357,100 @@ void NVIC_BMC_direct_handler (uint16_t num)
 		"======== TIP_FW: detected BMC int %d notification %#010lx cmd %#010lx" NEWLINE KNRM,
 		int_num, notification, REG_READ (FLASH_STATUS_COMMAND_SCR));
 
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+	if ((notification & BMC_DIRECT_NOTIFICATION_COMPOSITE_EAT) != 0) {
+		struct bmc_direct_composite_eat_request request;
+		const uint8_t *request_snapshot;
+		enum composite_eat_generator_status snapshot_status;
+		uint32_t command = REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_COMMAND));
+
+		request.id = REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_REQUEST_ID));
+		request.request_address =
+			REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_REQ_ADDR));
+		request.request_length = REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_REQ_LEN));
+		request.response_address =
+			REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_RESP_ADDR));
+		request.response_capacity =
+			REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_RESP_CAP));
+		REG_WRITE (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_COMMAND), 0xffffffffu);
+
+		if (command != BMC_DIRECT_COMMAND_COMPOSITE_EAT) {
+			bmc_direct_composite_eat_publish (BMC_DIRECT_COMPOSITE_EAT_UNSUPPORTED, 0, request.id);
+			NVIC_ClearInt (int_num);
+			NVIC_EnableInt (int_num, TRUE);
+			return;
+		}
+		if (request.request_length > BMC_DIRECT_COMPOSITE_EAT_REQ_SIZE) {
+			bmc_direct_composite_eat_publish (BMC_DIRECT_COMPOSITE_EAT_REQUEST_TOO_LARGE, 0,
+				request.id);
+			NVIC_ClearInt (int_num);
+			NVIC_EnableInt (int_num, TRUE);
+			return;
+		}
+		if (!bmc_direct_composite_eat_buffers_valid (request.request_address,
+				request.request_length, request.response_address, request.response_capacity)) {
+			bmc_direct_composite_eat_publish (BMC_DIRECT_COMPOSITE_EAT_ADDRESS_INVALID, 0,
+				request.id);
+			NVIC_ClearInt (int_num);
+			NVIC_EnableInt (int_num, TRUE);
+			return;
+		}
+		if (!bmc_direct_composite_eat_begin (&composite_eat_state, &request)) {
+			bmc_direct_composite_eat_publish (BMC_DIRECT_COMPOSITE_EAT_BUSY, 0, request.id);
+			NVIC_ClearInt (int_num);
+			NVIC_EnableInt (int_num, TRUE);
+			return;
+		}
+		request = composite_eat_state.pending;
+		if (composite_eat_generator == NULL) {
+			(void) bmc_direct_composite_eat_finish (BMC_DIRECT_COMPOSITE_EAT_INTERNAL, 0, &request);
+			return;
+		}
+		snapshot_status = composite_eat_generator_snapshot_request (composite_eat_generator,
+			(const uint8_t *) (uintptr_t) request.request_address, request.request_length,
+			&request_snapshot);
+		if (snapshot_status != COMPOSITE_EAT_GENERATOR_OK) {
+			(void) bmc_direct_composite_eat_finish (BMC_DIRECT_COMPOSITE_EAT_INTERNAL, 0, &request);
+			return;
+		}
+		composite_eat_state.pending.request_address = (uint32_t) (uintptr_t) request_snapshot;
+		request = composite_eat_state.pending;
+		if (!bmc_direct_composite_eat_request_current (&composite_eat_state, &request)) {
+			return;
+		}
+		if (xTaskNotifyFromISR (bmc_reset_task.bmc_task, BMC_DIRECT_COMPOSITE_EAT_TASK_EVENT,
+				eSetValueWithoutOverwrite, &reset_priority) != pdPASS) {
+			(void) bmc_direct_composite_eat_finish (BMC_DIRECT_COMPOSITE_EAT_BUSY, 0, &request);
+			return;
+		}
+		tip_mbx_clear_notification (BMC_DIRECT_NOTIFICATION_COMPOSITE_EAT);
+		__asm volatile("dmb" ::: "memory");
+		NVIC_ClearInt (int_num);
+		NVIC_EnableInt (int_num, TRUE);
+		return;
+	}
+#endif
+
+#ifdef BMC_DIRECT
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+	if (composite_eat_state.active) {
+		if ((notification & BMC_DIRECT_NOTIFCATION_FL) != 0) {
+			tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_PKT_STATE,
+				BMC_DIRECT_NOTIFCATION_FL);
+			return;
+		}
+		if ((notification & BMC_DIRECT_NOTIFCATION_RNG) != 0) {
+			tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_PKT_STATE,
+				BMC_DIRECT_NOTIFCATION_RNG);
+			return;
+		}
+		if ((notification & BMC_DIRECT_NOTIFCATION_AES) != 0) {
+			tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_PKT_STATE,
+				BMC_DIRECT_NOTIFCATION_AES);
+			return;
+		}
+	}
+#endif
 	/* check if it's a BMC_DIRECT Flash command */
 	if ((notification & BMC_DIRECT_NOTIFCATION_FL) > 0) {
 		notification_active = BMC_DIRECT_NOTIFCATION_FL;
@@ -293,7 +472,7 @@ void NVIC_BMC_direct_handler (uint16_t num)
 	else if (notification & system_i2c.notification_idx) {
 		/* cerberus_utility interrupt. uses polling only. ignore and clear */
 		tip_mbx_clear_notification (system_i2c.notification_idx);
-		return;
+		goto rearm_bmc_direct_irq;
 	}
 
 	else {
@@ -330,24 +509,27 @@ void NVIC_BMC_direct_handler (uint16_t num)
 		}
 		else {
 			platform_printf (KRED "BMC direct command %#010lx unknown" NEWLINE KNRM, cmd);
-			tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_ARGUMENT, BMC_DIRECT_NOTIFCATION_RNG);
+			tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_ARGUMENT,
+				BMC_DIRECT_NOTIFCATION_RNG);
 		}
 	}
 	else if (notification & system_i2c.notification_idx) {
 		/* cerberus_utility interrupt. uses polling only. ignore and clear */
 		tip_mbx_clear_notification (notification);
-		return;
+		goto rearm_bmc_direct_irq;
 	}
 	else {
 		platform_printf (KRED "BMC notification reg is %d unknown" NEWLINE KNRM, notification);
 		tip_mbx_clear_notification (notification);
 	}
+#endif /* BMC_DIRECT */
 
 	/* Clear BMC notification event */
+rearm_bmc_direct_irq:
 	NVIC_ClearInt (int_num);
 	NVIC_EnableInt (int_num, TRUE);
 }
-#endif /* BMC_DIRECT */
+#endif /* BMC_DIRECT || BMC_DIRECT_COMPOSITE_EAT */
 
 
 /**
@@ -470,7 +652,7 @@ static void bmc_release_from_reset (struct bmc_task *task, uint32_t addr, bool w
 void bmc_start (struct bmc_task *task, uint32_t addr, bool wait_for_finish)
 {
 	int boot_retry = 3;
-#ifdef BMC_DIRECT
+#if defined(BMC_DIRECT) || defined(BMC_DIRECT_COMPOSITE_EAT)
 	NVIC_EnableInt (NVIC_INT_2, FALSE);
 #endif
 	if (tip_L1_sys_ctrl.tip_disable_jtag) {
@@ -569,7 +751,7 @@ void bmc_continue (void)
 	/* continue to bl31 */
 	bmc_continue_l (bmc_start_addr[1] + sizeof (HEADER_GENERAL_T));
 
-#ifdef BMC_DIRECT
+#if defined(BMC_DIRECT) && !defined(BMC_DIRECT_COMPOSITE_EAT)
 	NVIC_ClearInt (NVIC_INT_2);
 	NVIC_EnableInt (NVIC_INT_2, TRUE);
 #else
@@ -589,7 +771,7 @@ void bmc_continue (void)
  * @return 0 for success or an error code.
  */
 int tip_load_bmc_firmware (struct bmc_task *task, struct spi_flash *flash, uint32_t start_offset,
-		struct hash_engine *hash, uint16_t reset_source, uint32_t *combo1_start_addr)
+	struct hash_engine *hash, uint16_t reset_source, uint32_t *combo1_start_addr)
 {
 	struct tip_firmware_component fw;
 	uint32_t img_type;
@@ -622,7 +804,8 @@ int tip_load_bmc_firmware (struct bmc_task *task, struct spi_flash *flash, uint3
 			/* anti-glitch: re-read secure boot flag */
 			if (!TIP_SECBOOT_IS_ACTIVE ()) {
 				status = 0;
-			} else {
+			}
+			else {
 				platform_printf (KRED "Image at %#010lx failed authentication" NEWLINE KNRM,
 					(uint32_t) fw.header_ram + sizeof (HEADER_GENERAL_T));
 
@@ -667,7 +850,7 @@ static void bmc_task_loop (void *data)
 {
 	uint32_t notification = 0;
 	int status;
-	struct bmc_task *task = (struct bmc_task*) data;
+	struct bmc_task *task = (struct bmc_task *) data;
 	uint32_t fiu, cs;
 	uint16_t reset_reg;
 	uint16_t reset;
@@ -700,11 +883,16 @@ static void bmc_task_loop (void *data)
 		else if (task->bmc_state == BMC_DDR_READY) {
 			switch (notification) {
 				case BMC_RESET_CMD:
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+					bmc_direct_composite_eat_reset (&composite_eat_state);
+#endif
 					/* slow peripherals are configured to be reset in BMC reset */
-					serial_printf_init (!tip_L1_sys_ctrl.tip_disable_print_to_uart, tip_L1_sys_ctrl.tip_print_to_memory);
+					serial_printf_init (!tip_L1_sys_ctrl.tip_disable_print_to_uart,
+						tip_L1_sys_ctrl.tip_print_to_memory);
 
-					platform_printf (KGRN NEWLINE "========" NEWLINE "   TIP_FW   : detected   BMC reset"
-						NEWLINE "========" NEWLINE "  NVIC_BMC_reset:" NEWLINE KNRM);
+					platform_printf (
+						KGRN NEWLINE "========" NEWLINE "   TIP_FW   : detected   BMC reset" NEWLINE
+									 "========" NEWLINE "  NVIC_BMC_reset:" NEWLINE KNRM);
 
 					reset_reg = tip_get_reset_indication ();
 
@@ -717,11 +905,11 @@ static void bmc_task_loop (void *data)
 					platform_printf (KGRN "reload BMC" NEWLINE KNRM);
 
 					/*
-					* Since BMC was reset TIP is getting ready for a possible error in current
-					* image. Only after current image is re-validated TIP will configure the
-					* current main image as the next image.
-					*/
-					tip_select_next_boot_image (tip_flash_get_recovery_phys_addr());
+					 * Since BMC was reset TIP is getting ready for a possible error in current
+					 * image. Only after current image is re-validated TIP will configure the
+					 * current main image as the next image.
+					 */
+					tip_select_next_boot_image (tip_flash_get_recovery_phys_addr ());
 
 					status = tip_flash_get_fiu_cs (active_flash, &fiu, &cs);
 					if (status != 0) {
@@ -730,7 +918,7 @@ static void bmc_task_loop (void *data)
 					}
 
 					/* Do not trust BMC that SPI is still configured properly.
-					* In next phase SPI will be locked so this step can be skipped */
+					 * In next phase SPI will be locked so this step can be skipped */
 					tip_flash_initialize_access_single_flash (fiu, cs);
 
 					reset = tip_get_reset_indication ();
@@ -762,7 +950,8 @@ static void bmc_task_loop (void *data)
 					/* Reload BMC only (without MC retraining) */
 					status = tip_load_bmc_firmware (task, active_flash,
 						recovery_boot ? recovery_flash_start_offset + ROT_COMBO1_ADDR_DEFAULT :
-						ROT_COMBO1_ADDR_DEFAULT, &shared_hash.base, reset, &combo1_start_addr);
+										ROT_COMBO1_ADDR_DEFAULT,
+						&shared_hash.base, reset, &combo1_start_addr);
 
 
 					if (ROT_IS_ERROR (status) == false) {
@@ -774,7 +963,8 @@ static void bmc_task_loop (void *data)
 						bmc_export_data ();
 
 #ifdef ENABLE_RECOVERY_PROTECTION
-						/* recovery image is ready, lock any changes to recovery image until next CORST */
+						/* recovery image is ready, lock any changes to recovery image until next
+						 * CORST */
 						if (tip_L1_sys_ctrl.tip_recovery_force) {
 							protect_recovery_flash ();
 						}
@@ -789,14 +979,23 @@ static void bmc_task_loop (void *data)
 						}
 						else {
 							/* in case of recovery boot the reset counters are useless, TIP has no
-							* better image to go to.*/
+							 * better image to go to.*/
 							tip_reset_counters_init (reset_counter);
 						}
+
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+						bmc_direct_composite_eat_reset (&composite_eat_state);
+						tip_mbx_clear_notification (BMC_DIRECT_NOTIFICATION_COMPOSITE_EAT);
+#endif
 
 						bmc_continue ();
 
 						/* Reenable the IRQ after complition */
 						NVIC_EnableInt (NVIC_INT_46, TRUE);
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+						NVIC_ClearInt (NVIC_INT_2);
+						NVIC_EnableInt (NVIC_INT_2, TRUE);
+#endif
 #ifdef GPIO_WOL
 						/* Reenable the GPIO IRQ after complition */
 						if (tip_L1_sys_ctrl.tip_gpio_wol) {
@@ -810,6 +1009,33 @@ static void bmc_task_loop (void *data)
 					}
 
 					break;
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+				case BMC_DIRECT_COMPOSITE_EAT_TASK_EVENT: {
+					struct bmc_direct_composite_eat_request request = composite_eat_state.pending;
+					size_t response_length = 0;
+					enum composite_eat_generator_status generator_status;
+					enum bmc_direct_composite_eat_status response_status;
+
+					if ((composite_eat_generator == NULL) || !composite_eat_state.active) {
+						(void) bmc_direct_composite_eat_finish (BMC_DIRECT_COMPOSITE_EAT_INTERNAL,
+							0, &request);
+						break;
+					}
+
+					generator_status = composite_eat_generate (composite_eat_generator,
+						(const uint8_t *) (uintptr_t) request.request_address,
+						request.request_length, (uint8_t *) (uintptr_t) request.response_address,
+						request.response_capacity, &response_length);
+					response_status =
+						bmc_direct_composite_eat_map_generator_status (generator_status);
+					if (!bmc_direct_composite_eat_finish (response_status,
+							(uint32_t) response_length, &request) &&
+						(response_length <= request.response_capacity)) {
+						memset ((void *) (uintptr_t) request.response_address, 0, response_length);
+					}
+					break;
+				}
+#endif
 #ifdef BMC_DIRECT
 				case BMC_DIRECT_COMMAND_FL_PROG: {
 					uint32_t fiu, cs, spi, offset;
@@ -821,16 +1047,20 @@ static void bmc_task_loop (void *data)
 					status = tip_flash_phys_to_logical (dst_addr, &fiu, &cs, &spi, &offset);
 					if (status != 0) {
 						platform_printf (KRED "error %#010lx out of range" NEWLINE KNRM, dst_addr);
-					} else {
+					}
+					else {
 						fl = tip_flash_get_spi_flash (spi);
 
 						if (offset + size > fl->state->device_size) {
-							platform_printf (KRED "error end addr %#010lx out of flash (size=%#010lx)" NEWLINE KNRM,
+							platform_printf (KRED
+								"error end addr %#010lx out of flash (size=%#010lx)" NEWLINE KNRM,
 								offset + size, fl->state->device_size);
 							status = FLASH_ADDRESS_OUT_OF_RANGE;
-						} else {
+						}
+						else {
 							/* write to flash */
-							platform_printf_dbg ("copy from %#010lx to fiu%d, cs%d %#010lx bytes" NEWLINE,
+							platform_printf_dbg ("copy from %#010lx to fiu%d, cs%d %#010lx "
+												 "bytes" NEWLINE,
 								src_addr, fiu, cs, size);
 							status = spi_flash_write (fl, offset, (uint8_t *) src_addr, size);
 						}
@@ -855,14 +1085,16 @@ static void bmc_task_loop (void *data)
 					fl = tip_flash_get_spi_flash (spi);
 
 					if (offset + size > fl->state->device_size) {
-						platform_printf (KRED "error end addr %#010lx out of flash (size=%#010lx)" NEWLINE KNRM,
+						platform_printf (KRED
+							"error end addr %#010lx out of flash (size=%#010lx)" NEWLINE KNRM,
 							offset + size, fl->state->device_size);
 						status = FLASH_ADDRESS_OUT_OF_RANGE;
-					} else {
+					}
+					else {
 
 						/* write to flash (todo: verifiy image if needed */
 						platform_printf_dbg ("copy from %#010lx, fiu%d, cs%d %#010lx bytes to "
-										"%#010lx" NEWLINE,
+											 "%#010lx" NEWLINE,
 							src_addr, fiu, cs, size, dst_addr);
 						status = spi_flash_read (fl, offset, (uint8_t *) dst_addr, size);
 					}
@@ -885,19 +1117,23 @@ static void bmc_task_loop (void *data)
 					fl = tip_flash_get_spi_flash (spi);
 
 					if (offset + size > fl->state->device_size) {
-						platform_printf (KRED "error end addr %#010lx out of flash (size=%#010lx)" NEWLINE KNRM,
+						platform_printf (KRED
+							"error end addr %#010lx out of flash (size=%#010lx)" NEWLINE KNRM,
 							offset + size, fl->state->device_size);
 						status = FLASH_ADDRESS_OUT_OF_RANGE;
-					} else {
+					}
+					else {
 
 						/* erase */
-						platform_printf_dbg ("erase fiu%d, cs%d %#010lx bytes" NEWLINE,
-							fiu, cs, size);
+						platform_printf_dbg ("erase fiu%d, cs%d %#010lx bytes" NEWLINE, fiu, cs,
+							size);
 
 						if ((size % _4KB_) || (dst_addr % _4KB_)) {
-							platform_printf (KRED "erase flash should be of sectors size" NEWLINE KNRM);
+							platform_printf (
+								KRED "erase flash should be of sectors size" NEWLINE KNRM);
 							status = FLASH_ADDRESS_OUT_OF_RANGE;
-						} else {
+						}
+						else {
 							for (int i = offset; i < offset + size; i += _4KB_) {
 								platform_printf_dbg ("erase %#010lx" NEWLINE, i);
 								status = spi_flash_sector_erase (fl, i);
@@ -918,7 +1154,8 @@ static void bmc_task_loop (void *data)
 
 					status = tip_flash_phys_to_logical (fl_addr, &fiu, &cs, &spi, &offset);
 					if (status != 0) {
-						platform_printf_dbg (KRED "error %#010lx out of range" NEWLINE KNRM, fl_addr);
+						platform_printf_dbg (KRED "error %#010lx out of range" NEWLINE KNRM,
+							fl_addr);
 						tip_bmc_direct_finalize_command (status, BMC_DIRECT_NOTIFCATION_FL);
 						break;
 					}
@@ -946,16 +1183,16 @@ static void bmc_task_loop (void *data)
 
 						spi_flash_get_block_size (fl, &size);
 						REG_WRITE (FLASH_PRM5_SCR, size);
-						REG_WRITE (FLASH_PRM6_SCR, *(uint32_t*) fl->state->device_id);
+						REG_WRITE (FLASH_PRM6_SCR, *(uint32_t *) fl->state->device_id);
 					}
 					tip_bmc_direct_finalize_command (status, BMC_DIRECT_NOTIFCATION_FL);
 					break;
 				}
 
 				case BMC_DIRECT_COMMAND_FW_UPDATE: {
-uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
-				uint32_t dst_addr = TIP_VIRTUAL_FLASH_BASE_ADDR;
-				uint32_t size = REG_READ (FLASH_PRM3_SCR);
+					uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
+					uint32_t dst_addr = TIP_VIRTUAL_FLASH_BASE_ADDR;
+					uint32_t size = REG_READ (FLASH_PRM3_SCR);
 
 					/* copy to secured staging area */
 					platform_printf (KGRN
@@ -971,20 +1208,23 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 				case BMC_DIRECT_COMMAND_DRBG: {
 					uint32_t num_of_random_bytes = REG_READ (RNG_SIZE_SCR);
 					uint32_t addr = REG_READ (RNG_BUFFER_ADDR_SCR);
-				
+
 					/* copy to secured staging area */
 					platform_printf_dbg (KGRN
 						"DRBG: create %#010lx rand bytes at %#010lx" NEWLINE KNRM,
 						num_of_random_bytes, addr);
 
-					if ((addr < 96 * _1MB_) || ((addr + num_of_random_bytes) >= SDRAM_MAPPED_SIZE)) {
+					if ((addr < 96 * _1MB_) ||
+						((addr + num_of_random_bytes) >= SDRAM_MAPPED_SIZE)) {
 						platform_printf (KRED
-						"ERROR DRBG: create %#010lx rand bytes at %#010lx out of range"
-							NEWLINE KNRM, num_of_random_bytes, addr);
+							"ERROR DRBG: create %#010lx rand bytes at %#010lx out of range" NEWLINE
+								KNRM,
+							num_of_random_bytes, addr);
 						status = RNG_ENGINE_NO_MEMORY;
 					}
 					else {
-						status = system_rng.base.generate_random_buffer (&(system_rng.base), num_of_random_bytes, (uint8_t *)addr);
+						status = system_rng.base.generate_random_buffer (&(system_rng.base),
+							num_of_random_bytes, (uint8_t *) addr);
 					}
 					tip_bmc_direct_finalize_command (status, BMC_DIRECT_NOTIFCATION_RNG);
 					break;
@@ -995,18 +1235,18 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 				case BMC_DIRECT_COMMAND_AES_ENC_CTR:
 				case BMC_DIRECT_COMMAND_AES_ENC_GCM:
 
-					
+
 				case BMC_DIRECT_COMMAND_AES_DEC_ECB:
 				case BMC_DIRECT_COMMAND_AES_DEC_CBC:
 				case BMC_DIRECT_COMMAND_AES_DEC_CTR:
 				case BMC_DIRECT_COMMAND_AES_DEC_GCM: {
 
 					op = (NCL_AES_OP_T) notification & 0x01;
-					mode = (NCL_AES_MODE_T)(notification >> 4 ) - 1;
+					mode = (NCL_AES_MODE_T) (notification >> 4) - 1;
 
 					/*
 					 * SCRPAD 24 – address of block to encrypt/decrypt
-					 * SCRPAD 25 – size of block 
+					 * SCRPAD 25 – size of block
 					 * SCRPAD 26 – operation. 0 encrypt, 1 decrypt
 					 * SCRPAD 27 – destination of AES output
 					 * SCRPAD 28 – IV info
@@ -1022,15 +1262,15 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 						uint32_t size;
 						uint32_t arr;
 					};
-	
+
 					uint32_t addr_src = REG_READ (AES_BLOCK_ADDR_SCR);
 					uint32_t addr_dst = REG_READ (AES_OUTPUT_ADDR_SCR);
 					uint32_t size = REG_READ (AES_BLOCK_SIZE_SCR);
 
-					struct info *iv_info = (struct info *)REG_READ (AES_IV_INFO_SCR);
-					struct info *key_info = (struct info *)REG_READ (AES_KEY_INFO_SCR);
-					struct info *tag_info = (struct info *)REG_READ (AES_TAG_INFO_SCR);
-					
+					struct info *iv_info = (struct info *) REG_READ (AES_IV_INFO_SCR);
+					struct info *key_info = (struct info *) REG_READ (AES_KEY_INFO_SCR);
+					struct info *tag_info = (struct info *) REG_READ (AES_TAG_INFO_SCR);
+
 					uint8_t *iv = NULL;
 					uint32_t iv_size = 0;
 					uint8_t *key = NULL;
@@ -1039,64 +1279,71 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 					uint32_t tag_size = 0;
 
 					if (iv_info != NULL) {
-						iv = (uint8_t *)&iv_info->arr;
+						iv = (uint8_t *) &iv_info->arr;
 						iv_size = iv_info->size & 0x00007FF;
 					}
 
 					if (key_info != NULL) {
-						key = (uint8_t *)&key_info->arr;
+						key = (uint8_t *) &key_info->arr;
 						key_size = key_info->size & 0x00007FF;
 					}
 
 					if (tag_info != NULL) {
-						tag = (uint8_t *)&tag_info->arr;
+						tag = (uint8_t *) &tag_info->arr;
 						tag_size = tag_info->size & 0x00007FF;
 					}
 
-					platform_printf ( "scrpad24 %#010lx %#010lx \n", REG_ADDR (AES_BLOCK_ADDR_SCR),  REG_READ(AES_BLOCK_ADDR_SCR));
-					platform_printf ( "scrpad27 %#010lx %#010lx \n", REG_ADDR (AES_OUTPUT_ADDR_SCR),  REG_READ(AES_OUTPUT_ADDR_SCR));
-					platform_printf ( "scrpad28 %#010lx %#010lx \n", REG_ADDR (AES_IV_INFO_SCR),  REG_READ(AES_IV_INFO_SCR));
-					platform_printf ( "scrpad29 %#010lx %#010lx \n", REG_ADDR (AES_KEY_INFO_SCR),  REG_READ(AES_KEY_INFO_SCR));
+					platform_printf ("scrpad24 %#010lx %#010lx \n", REG_ADDR (AES_BLOCK_ADDR_SCR),
+						REG_READ (AES_BLOCK_ADDR_SCR));
+					platform_printf ("scrpad27 %#010lx %#010lx \n", REG_ADDR (AES_OUTPUT_ADDR_SCR),
+						REG_READ (AES_OUTPUT_ADDR_SCR));
+					platform_printf ("scrpad28 %#010lx %#010lx \n", REG_ADDR (AES_IV_INFO_SCR),
+						REG_READ (AES_IV_INFO_SCR));
+					platform_printf ("scrpad29 %#010lx %#010lx \n", REG_ADDR (AES_KEY_INFO_SCR),
+						REG_READ (AES_KEY_INFO_SCR));
 
-					hex_dump ((uint32_t)key, key_size, "key");
+					hex_dump ((uint32_t) key, key_size, "key");
 
-					hex_dump ((uint32_t)iv, iv_size, "iv");
+					hex_dump ((uint32_t) iv, iv_size, "iv");
 
 					/* copy to secured staging area */
-					platform_printf (KGRN
-						"AES: addr_src = %#010lx "
-						"addr_dst = %#010lx "
-						"size = %#010lx "
-						"iv = %#010lx "
-						"iv_size = %#010lx "
-						"key = %#010lx "
-						"key_size = %#010lx "
-						"tag = %#010lx "
-						"tag_size = %#010lx " 
-						"op = %x "
-						"mode = %x " NEWLINE, 
-						addr_src, addr_dst, size, iv, iv_size, key, key_size, tag, tag_size, op, mode);
+					platform_printf (KGRN "AES: addr_src = %#010lx "
+										  "addr_dst = %#010lx "
+										  "size = %#010lx "
+										  "iv = %#010lx "
+										  "iv_size = %#010lx "
+										  "key = %#010lx "
+										  "key_size = %#010lx "
+										  "tag = %#010lx "
+										  "tag_size = %#010lx "
+										  "op = %x "
+										  "mode = %x " NEWLINE,
+						addr_src, addr_dst, size, iv, iv_size, key, key_size, tag, tag_size, op,
+						mode);
 
-						status = fw_enc_dec_aes.set_mode (&fw_enc_dec_aes, mode);
-						if (status != 0) {
-							goto bmc_direct_fin;
-						}
+					status = fw_enc_dec_aes.set_mode (&fw_enc_dec_aes, mode);
+					if (status != 0) {
+						goto bmc_direct_fin;
+					}
 
-						status = fw_enc_dec_aes.base.set_key (&fw_enc_dec_aes.base, (uint8_t*)key, key_size);
-						if (status != 0) {
-							goto bmc_direct_fin;
-						}
+					status = fw_enc_dec_aes.base.set_key (&fw_enc_dec_aes.base, (uint8_t *) key,
+						key_size);
+					if (status != 0) {
+						goto bmc_direct_fin;
+					}
 
-						if (op == NCL_AES_OP_ENCRYPT) {
-							status = fw_enc_dec_aes.base.encrypt_data (&(fw_enc_dec_aes.base), (uint8_t*) addr_src,
-								size, (uint8_t*) iv, iv_size, (uint8_t*) addr_dst, size, (uint8_t*)tag,
-								tag_size);
-						} else {
-							status = fw_enc_dec_aes.base.decrypt_data (&(fw_enc_dec_aes.base), (uint8_t*) addr_src,
-								size, (uint8_t*)tag, (uint8_t*) iv, iv_size, (uint8_t*) addr_dst, size);
-						}
+					if (op == NCL_AES_OP_ENCRYPT) {
+						status = fw_enc_dec_aes.base.encrypt_data (&(fw_enc_dec_aes.base),
+							(uint8_t *) addr_src, size, (uint8_t *) iv, iv_size,
+							(uint8_t *) addr_dst, size, (uint8_t *) tag, tag_size);
+					}
+					else {
+						status = fw_enc_dec_aes.base.decrypt_data (&(fw_enc_dec_aes.base),
+							(uint8_t *) addr_src, size, (uint8_t *) tag, (uint8_t *) iv, iv_size,
+							(uint8_t *) addr_dst, size);
+					}
 
-bmc_direct_fin:
+				bmc_direct_fin:
 					tip_bmc_direct_finalize_command (status, BMC_DIRECT_NOTIFCATION_AES);
 					break;
 				}
@@ -1131,8 +1378,7 @@ bmc_direct_fin:
  *
  * @return Initialization status, 0 if success or an error code.
  */
-int bmc_task_init (struct bmc_task *task, int priority, uint16_t stack_words,
-	struct system *system)
+int bmc_task_init (struct bmc_task *task, int priority, uint16_t stack_words, struct system *system)
 {
 	int status;
 
@@ -1146,7 +1392,7 @@ int bmc_task_init (struct bmc_task *task, int priority, uint16_t stack_words,
 	task->system = system;
 	tip_reset_counters_init (reset_counter);
 
-#ifdef BMC_DIRECT
+#if defined(BMC_DIRECT) || defined(BMC_DIRECT_COMPOSITE_EAT)
 	/* Detect BMC reset interrupt: INT46 Level High BMC CPU reset Interrupt */
 	NVIC_InstallSwHandler (NVIC_INT_2, (SW_HANDLER_T) NVIC_BMC_direct_handler);
 	NVIC_ConfigPriority (NVIC_INT_2, 0x5);
@@ -1154,7 +1400,7 @@ int bmc_task_init (struct bmc_task *task, int priority, uint16_t stack_words,
 	NVIC_EnableInt (NVIC_INT_2, FALSE);
 #endif
 
-	status = xTaskCreate (bmc_task_loop, "BMC_LOOP", stack_words, (void*) task, priority,
+	status = xTaskCreate (bmc_task_loop, "BMC_LOOP", stack_words, (void *) task, priority,
 		&task->bmc_task);
 	if (status != pdPASS) {
 		return status;
@@ -1166,7 +1412,8 @@ int bmc_task_init (struct bmc_task *task, int priority, uint16_t stack_words,
 
 #if configSUPPORT_STATIC_ALLOCATION == 1
 /**
- * Create BMC reset handling task with statically allocated stack and start the task to process bmc reset.
+ * Create BMC reset handling task with statically allocated stack and start the task to process bmc
+ * reset.
  *
  * @note PCD and CFM must be initialized prior to calling this, if component attestation is enabled.
  *
@@ -1191,7 +1438,7 @@ int bmc_task_init_static (struct bmc_task *task, StaticTask_t *context, StackTyp
 	task->bmc_state = BMC_DISABLE;
 	tip_reset_counters_init (reset_counter);
 
-#ifdef BMC_DIRECT
+#if defined(BMC_DIRECT) || defined(BMC_DIRECT_COMPOSITE_EAT)
 	/* Detect BMC reset interrupt: INT46 Level High BMC CPU reset Interrupt */
 	NVIC_InstallSwHandler (NVIC_INT_2, (SW_HANDLER_T) NVIC_BMC_direct_handler);
 	NVIC_ConfigPriority (NVIC_INT_2, 0x5);
@@ -1199,7 +1446,7 @@ int bmc_task_init_static (struct bmc_task *task, StaticTask_t *context, StackTyp
 	NVIC_EnableInt (NVIC_INT_2, FALSE);
 #endif
 
-	task->bmc_task = xTaskCreateStatic (bmc_task_loop, "BMC_LOOP", stack_words, (void*) task,
+	task->bmc_task = xTaskCreateStatic (bmc_task_loop, "BMC_LOOP", stack_words, (void *) task,
 		priority, stack, context);
 	if (task->bmc_task == NULL) {
 		/* TODO : Fix this to return meaningful error code. */
@@ -1339,21 +1586,23 @@ void bmc_export_data (void)
 	}
 
 	/* Copy shared attestation area, excluding alias_key */
-	size_to_copy = offsetof(struct riot_shared_attestation, alias_key);
+	size_to_copy = offsetof (struct riot_shared_attestation, alias_key);
 	mailbox_attestation = mailbox;
 	memcpy (mailbox, (uint8_t *) riot, size_to_copy);
 
 	/* skip alias key, but keep struct format the same */
-	mailbox += size_to_copy + MAX_ALIAS_KEY_LENGTH + sizeof(int);
+	mailbox += size_to_copy + MAX_ALIAS_KEY_LENGTH + sizeof (int);
 
 	/* Copy second portion of RIoT struct, not including the hash at the end, since it must be
 	 * calculated again without the alias key.
 	 */
-	size_to_copy = sizeof (struct riot_shared_attestation) - offsetof (struct riot_shared_attestation, alias_cert) - SHA256_HASH_LENGTH;
-	memcpy (mailbox, (uint8_t *) riot + offsetof (struct riot_shared_attestation, alias_cert), size_to_copy);
+	size_to_copy = sizeof (struct riot_shared_attestation) -
+		offsetof (struct riot_shared_attestation, alias_cert) - SHA256_HASH_LENGTH;
+	memcpy (mailbox, (uint8_t *) riot + offsetof (struct riot_shared_attestation, alias_cert),
+		size_to_copy);
 
 	/* Calculate the hash of all the keys and the certificates shared with the main application. */
-	status = system_hash.base.calculate_sha256 (&system_hash.base, (uint8_t*) mailbox_attestation,
+	status = system_hash.base.calculate_sha256 (&system_hash.base, (uint8_t *) mailbox_attestation,
 		sizeof (struct riot_shared_attestation) - sizeof (riot->attestation_hash),
 		mailbox_attestation + offsetof (struct riot_shared_attestation, attestation_hash),
 		sizeof (riot->attestation_hash));

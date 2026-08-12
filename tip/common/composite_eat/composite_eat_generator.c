@@ -320,6 +320,12 @@ composite_eat_generate (const struct composite_eat_generator *generator, const u
 		composite_eat_codec_decode_request (request, request_length, &workspace->request);
 	if (codec_status != COMPOSITE_EAT_CODEC_OK) {
 		workspace->active = false;
+		if (codec_status == COMPOSITE_EAT_CODEC_BAD_VERSION) {
+			return COMPOSITE_EAT_GENERATOR_BAD_VERSION;
+		}
+		if (codec_status == COMPOSITE_EAT_CODEC_TOO_MANY_RECORDS) {
+			return COMPOSITE_EAT_GENERATOR_TOO_MANY_RECORDS;
+		}
 		return COMPOSITE_EAT_GENERATOR_BAD_REQUEST;
 	}
 
@@ -418,4 +424,22 @@ release_keys:
 	generator->attestation->release_keys (generator->riot, keys);
 	workspace->active = false;
 	return status;
+}
+
+enum composite_eat_generator_status
+composite_eat_generator_snapshot_request (const struct composite_eat_generator *generator,
+	const uint8_t *request, size_t request_length, const uint8_t **snapshot)
+{
+	if ((snapshot != NULL)) {
+		*snapshot = NULL;
+	}
+	if ((generator == NULL) || (generator->workspace == NULL) || (request == NULL) ||
+		(request_length == 0) || (request_length > sizeof (generator->workspace->payload)) ||
+		(snapshot == NULL) || generator->workspace->active) {
+		return COMPOSITE_EAT_GENERATOR_BAD_ARGUMENT;
+	}
+
+	memcpy (generator->workspace->payload, request, request_length);
+	*snapshot = generator->workspace->payload;
+	return COMPOSITE_EAT_GENERATOR_OK;
 }

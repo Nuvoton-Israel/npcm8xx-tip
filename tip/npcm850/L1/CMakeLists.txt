@@ -193,6 +193,7 @@
 		target_sources(
 			${TARGET_NAME}
 			PRIVATE
+				${COMPOSITE_EAT_DIR}/bmc_direct_composite_eat_state.c
 				${COMPOSITE_EAT_DIR}/composite_eat_codec.c
 				${COMPOSITE_EAT_DIR}/composite_eat_generator.c
 				${COMPOSITE_EAT_DIR}/qcbor/src/UsefulBuf.c
@@ -214,6 +215,7 @@
 				QCBOR_DISABLE_FLOAT_HW_USE
 				USEFULBUF_DISABLE_ALL_FLOAT
 			)
+		target_compile_options(${TARGET_NAME} PRIVATE -fstack-usage)
 	endif()
 	set(DUMMY_OTP_VALUE 0 CACHE STRING "default 0 for DUMMY_OTP_VALUE")
 	target_compile_definitions(${TARGET_NAME} PRIVATE TIP_DUMMY_OTP_ON_RAM=${DUMMY_OTP_VALUE})

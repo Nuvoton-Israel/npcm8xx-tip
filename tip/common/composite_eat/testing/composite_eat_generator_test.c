@@ -282,6 +282,7 @@ static void composite_eat_generator_test_happy_path (CuTest *test)
 	struct composite_eat_generator generator;
 	uint8_t request[256];
 	uint8_t response[4096];
+	const uint8_t *request_snapshot;
 	size_t request_length;
 	size_t response_length = 0;
 	QCBORDecodeContext decoder;
@@ -301,7 +302,12 @@ static void composite_eat_generator_test_happy_path (CuTest *test)
 	status = composite_eat_generator_init_with_attestation (&generator, &test_ecc, &test_hash,
 		&test_riot, &test_pcr_store, &workspace, &test_attestation);
 	CuAssertIntEquals (test, COMPOSITE_EAT_GENERATOR_OK, status);
-	status = composite_eat_generate (&generator, request, request_length, response,
+	status = composite_eat_generator_snapshot_request (&generator, request, request_length,
+		&request_snapshot);
+	CuAssertIntEquals (test, COMPOSITE_EAT_GENERATOR_OK, status);
+	CuAssertPtrNotNull (test, request_snapshot);
+	memset (request, 0, request_length);
+	status = composite_eat_generate (&generator, request_snapshot, request_length, response,
 		sizeof (response), &response_length);
 	CuAssertIntEquals (test, COMPOSITE_EAT_GENERATOR_OK, status);
 	CuAssertTrue (test, response_length > 0);
@@ -556,6 +562,24 @@ static void composite_eat_generator_test_es384_interoperability (CuTest *test)
 
 static void composite_eat_generator_test_failures (CuTest *test)
 {
+	static const uint8_t too_many_records[] = {
+		0xa3,
+		0x01,
+		0x01,
+		0x02,
+		0x48,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0,
+		0x03,
+		0x98,
+		65,
+	};
 	static struct composite_eat_generator_workspace workspace;
 	struct composite_eat_generator generator;
 	uint8_t request[256];
@@ -576,6 +600,15 @@ static void composite_eat_generator_test_failures (CuTest *test)
 	CuAssertIntEquals (test, COMPOSITE_EAT_GENERATOR_BAD_REQUEST, status);
 	CuAssertIntEquals (test, 0, response_length);
 	CuAssertIntEquals (test, 0, release_count);
+
+	request[2] = 2;
+	status = composite_eat_generate (&generator, request, request_length, response,
+		sizeof (response), &response_length);
+	CuAssertIntEquals (test, COMPOSITE_EAT_GENERATOR_BAD_VERSION, status);
+	request[2] = COMPOSITE_EAT_REQUEST_VERSION;
+	status = composite_eat_generate (&generator, too_many_records, sizeof (too_many_records),
+		response, sizeof (response), &response_length);
+	CuAssertIntEquals (test, COMPOSITE_EAT_GENERATOR_TOO_MANY_RECORDS, status);
 
 	hash_failure = 1;
 	response_length = 9;

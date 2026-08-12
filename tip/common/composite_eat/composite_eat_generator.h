@@ -24,6 +24,8 @@ enum composite_eat_generator_status {
 	COMPOSITE_EAT_GENERATOR_OK = 0,
 	COMPOSITE_EAT_GENERATOR_BAD_ARGUMENT,
 	COMPOSITE_EAT_GENERATOR_BAD_REQUEST,
+	COMPOSITE_EAT_GENERATOR_BAD_VERSION,
+	COMPOSITE_EAT_GENERATOR_TOO_MANY_RECORDS,
 	COMPOSITE_EAT_GENERATOR_BUFFER_TOO_SMALL,
 	COMPOSITE_EAT_GENERATOR_ATTESTATION_ERROR,
 	COMPOSITE_EAT_GENERATOR_HASH_ERROR,
@@ -76,6 +78,10 @@ composite_eat_generator_init_with_attestation (struct composite_eat_generator *g
 enum composite_eat_generator_status
 composite_eat_generate (const struct composite_eat_generator *generator, const uint8_t *request,
 	size_t request_length, uint8_t *response, size_t response_capacity, size_t *response_length);
+
+enum composite_eat_generator_status
+composite_eat_generator_snapshot_request (const struct composite_eat_generator *generator,
+	const uint8_t *request, size_t request_length, const uint8_t **snapshot);
 
 
 #endif /* COMPOSITE_EAT_GENERATOR_H_ */

@@ -82,6 +82,9 @@
 #include "tip_skmt.h"
 #include "tip_utils.h"
 #include "tip_version.h"
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+#include "composite_eat/composite_eat_generator.h"
+#endif
 #include "tip_virtual_flash.h"
 #include "twd_task.h"
 #include "tip_reset.h"
@@ -579,6 +582,11 @@ static struct device_manager device_manager;
  *  Platform and host PCR storage.
  */
 static struct pcr_store pcr_storage;
+
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+static struct composite_eat_generator composite_eat_generator;
+static struct composite_eat_generator_workspace composite_eat_workspace;
+#endif
 
 #ifdef CMD_SUPPORT_ENCRYPTED_SESSIONS
 /**
@@ -2721,6 +2729,16 @@ static void cerberus_init (void *unused)
 		error_msg = INIT_LOGGING_PCR_STORE;
 		goto reset;
 	}
+
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+	status = composite_eat_generator_init (&composite_eat_generator, &shared_ecc.base,
+		&shared_hash.base, &riot, &pcr_storage, &composite_eat_workspace);
+	if (status != COMPOSITE_EAT_GENERATOR_OK) {
+		error_msg = INIT_LOGGING_PCR_STORE;
+		goto reset;
+	}
+	bmc_direct_composite_eat_configure (&composite_eat_generator);
+#endif
 
 	/* Nuvoton BMC specific workflow */
 	bmc_export_data ();

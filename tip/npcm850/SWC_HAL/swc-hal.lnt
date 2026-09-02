@@ -1,0 +1,94 @@
+//    swc-hal.lnt
+//    PC-Lint Options for the SWC_HAL Software Component
+
+//    This file contains options to allow PC-Lint to process source
+//    files for the Software Common HAL Drivers (SWC_HAL).
+//
+//    lint-nt  swc-hal.lnt
+//
+
+
+// GENERAL
++fdi                            // Use the directory of the including file
++fie                            // Integer-model-for-Enum flag ON
+-e537                           // Repeated include file
+-e701                           // shifting int left is OK
+-e766                           // Suppress warnings about HAL modules not used by  'hal.c'
+-e726                           // Suppress warnings about 'Extraneous comma ignored'
+-e614                           // Suppress warnings about 'auto aggregate initializer not constant'
+-e793                           // Suppress warnings about ANSI limit of 4095 macros in module exceeded
+-esym(715, int_num)             // Suppress 'int_num' not referenced in some interrupt handlers
+-esym(750, HAL_C)               // Suppress the non reference local macro warning
+-esym(578, div, remainder)      // Suppress Declaration of symbol 'div'/'remainder' hides symbol 'div'/'remainder' from stdlib.h/math.h
+-esym(666, *)                   // Expression with side effects passed to repeated parameter X in macro Y - when calling a function
+                                // (e.g., CHIP_SMB_INT(module_num)) in a macro, which in turn expands to another macro, such as in
+                                // INTERRUPT_SAVE_DISABLE(SMB_INTERRUPT_PROVIDER, SMB_INTERRUPT(module_num), intr);
+
+// HFCG
+-emacro(506,FLASH_FAST_READ)    // Constant value Boolean
+-emacro(774,FLASH_FAST_READ)    // Boolean within 'if' always evaluates to True
+-emacro(778,HFCGP_VAL)          // Constant expression evaluates to 0: (FLASH_DIVIDER) - 1
+
+
+// ICU
+-esym(528,ICU_DispatchTable)    // Suppress symbol 'ICU_DispatchTable' not referenced
+
+
+// NVIC
+-esym(528,*Handler_l,*_Isr)     // Interrupt handler not referenced (EXTERNAL_DISPATCH_TABLE)
+
+
+// MFT
+-emacro(506,MFT_BASE_ADDR)      // MFT_BASE_ADDR gets a constant as a parameter 'module',
+                                // which evaluates to a constant boolean (module < 3).
+-emacro(778,MFT_BASE_ADDR)      // Constant expression evaluates to 0: (MFT_MODULE_4 - 3)
+
+
+// MIWU
+-emacro(778,MIWU_SRC,MIWU_INTERRUPT_ENTRY) // Suppress Constant expression evaluates to 0 in operation '-'
+
+
+// PWM
+-esym(749,PWM_32K_CLOCK)        // Currently only PWM_CORE_CLOCK is in use
+
+
+// SIB
+-emacro(778,SIB_ADDRESS_DEV)
+-emacro(572,SIB_ADDRESS_DEV)    // the usage of MSB macro here, where device is 0 (SIB_CFG_DEV),
+                                // evaluates to (0 >> 8) expression. This generates warnings 572/778
+
+// SMB
+-esym(749,SMB_NO_OPER)          // Enumeration not in use.
+
+
+// PECI
+-emacro(506,PECI_MUX)           // Constant value Boolean
+-emacro(774,PECI_MUX)           // Boolean within 'if' always evaluates to True
+
+
+// CIR
+-esym(767,CIR_EXT)              // Suppress 'extern' scheme
+
+
+// ADC
+-esym(715, adc_module)          // Suppress 'adc_module' not referenced in ADC_BASE_ADDR()
+
+
+// FIU
+-esym(715, fiu_module)          // Suppress 'fiu_module' not referenced in FIU_BASE_ADDR()
+
+
+// NCL
+-emacro(527, NCL_MISC_SELFTEST_FAIL) // Suppress Unreachable code at token ';'
+
+
+// SOURCES
+-u hal.c                        // Since usually only portions of hal.c are used,
+                                // we perform a unit checkout to suppress many inter-module messages
+
+
+// Reanble inhibited error messages
++e537
++e766
+-fie
+

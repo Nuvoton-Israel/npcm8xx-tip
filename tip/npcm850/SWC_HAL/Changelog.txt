@@ -1,0 +1,1591 @@
+v3.6.6
+-------
+- ModuleDrivers\espi                    - Check Bus Error for Unsuccessful Flash Completion
+- ModuleDrivers\espi\8                  - Fixed Dalton's eSPI reset errata issue
+                                        - Remove ESPI_CAPABILITY_FLASH_STRPHDR_IN_MANUAL_MODE capability
+- ModuleDrivers\pwm                     - Add PWM_GetPercentage function
+- ModuleDrivers\fuse                    - Add FUSE_Set_Prog_Magic_Word() and FUSE_get_Prog_Magic_Word()
+                                        - Set FUSE_Prog_Magic_Word
+                                        - Those functions protect against programming fuses when the code is not running as expected
+                                          due to a SW issue or malicious hacking of the code
+
+v3.6.5
+-------
+- LogicalDrivers\ncl\hw_all\ncl_drv     - Fix issue #957: "calling twice NCL_DRBG_Init() will regenerate 128 bytes from RNG module"
+                                          Move calling NCL_MISC_GetStatus(NCL_ALGO_DRBG) to be after NCL_MISC_MODULE_ST_CHECK(NCL_ALGO_DRBG)
+
+v3.6.4
+-------
+- ModuleDrivers\rng                     - Some optimization in RNG_Init()
+- ModuleDrivers\clk                     - Add CLK_Delay_Sec() that simply count seconds
+- LogicalDrivers\flash_dev              - Make sure calculation size in FLASH_DEV_GetFlashSize() will not overflow
+- LogicalDrivers\drbg\hw_sha            - Added API to toggle Conditioning Function usage (TRUE/FALSE)
+                                        - Conditioner function size fix
+- LogicalDrivers\ncl                    - Add NCL_ECC_EditKdfFuncAndData_l() that decides what to send to ECC_GenKeyPair() according to the input
+- LogicalDrivers\ncl\hw_all\ncl_drv     - If no external KDF is provided - pass the KDF data to the HAL layer as NULL
+- LogicalDrivers\ecc\hw_pka\ecc_drv     - In case an external KDF was provided, do not set the MSBit for countermeasures
+- Tools\Releases\npcm850\NCL            - Added utility script for npcm850 SWC HAL source release
+- Tools\Releases\npcd321h\HP            - Added utility script for npcd321h SWC HAL source release
+
+v3.6.3
+-------
+- Chips\npcm850\npcm850.h               - Remove Life Cycle definitions since they are SW based
+                                        - Added RNG_ENTROPY_RATE as a chip parameter
+- Chips\npcm850\npcx9mnx.h              - Added RNG_ENTROPY_RATE as a chip parameter
+- Chips\npcm850_tip\npcm850_tip.h       - Fix TIP RNG Prescalar calculation
+- Chips\npcm850_tip\npcm850_tip.c       - Fix issue #876: OTP read errors does not set SEC_ERR.SW_SEC_ERR
+- ModuleDrivers\clk\4                   - Fix TIP APB CLK calculation
+                                        - Fix issue #897: TIP ROM Code: Loop for 10 minutes not working
+                                          The calculation of UINT32 CLK_Delay_MicroSec (UINT32 microSec) was wrong if
+- ModuleDrivers\rng                     - Remove RNG_CAPABILITY_CLOCK_PRE and add RNG_NUM_OF_CLK_PRESCALE instead, since
+                                          CLKP (clock prescalar) has different legal values
+                                        - Add RNG_1BIT_PER_RNGD that takes bit 6 from the RNGD 8 times and create a
+                                          byte from it
+                                        - Add RNG_UseSingleOrAllBits(BOOLEAN AllBitsEnable) to override RNG_1BIT_PER_RNGD
+                                          setting, user will be able to decide if to use all 8 bits or only one.
+                                        - Add RNG_LockConfiguration(BOOLEAN lockConfiguration) so next calls
+                                          to RNG_Config() can be ignored
+                                        - RNG_Config() is ignored if RNG_LockConfiguration was called with TRUE
+                                        - RNG_Config() set additional default parameters
+                                        - Add RNG_SetClk(RNG_CLK_PRE_T clk) that sets CLKP (clock prescalar) even
+                                          if RNG_LockConfiguration() was called with TRUE
+                                        - Improve performance if RNG_NUM_OF_MODULES == 1
+                                          microSec was grater than 172 seconds
+                                        - Fix issue #925: "RNG_Init function fails to finish when running in single RNG module mode"
+                                          DEFS_STATUS_COND_CHECK(singleModuleOrAllModules <= RNG_MODULE_ALL, DEFS_STATUS_PARAMETER_OUT_OF_RANGE);
+- ModuleDrivers\scs                     - Add SCS_Init()
+                                        - Additional debug prints
+- ModuleDrivers\fiu\41                  - Add FIU_UMA_ioctl()
+- LogicalDrivers\drbg\hw_sha            - Add Conditioning Function according to FIPS recommendations
+                                        - Modify Entropy and Nonce sizes accordingly
+                                        - Modify loop in DRBG_EntropyGetAndTest_l() to avoid PC-LINT warning
+
+v3.6.2
+-------
+- ModuleDrivers\miwu                    - Dalton Issue #171 W/A: Any-edge event detection is not functional for all MIWU inputs
+
+v3.6.1
+-------
+- ModuleDrivers\kbscan                  - Add KBSCAN_Kbsout_InvertSet function
+
+v3.6.0
+-------
+- ModuleDrivers\espi                    - Fix issue #262: Firmware performs retry when error 90h is received via PECI over eSPI
+- ModuleDrivers\smb                     - Support a specific device that require a delay before repeated start
+- LogicalDrivers\flash_dev              - Fix issue: FLASH_DEV_Erase might enter an endless loop
+
+v3.5.9
+-------
+- ModuleDrivers\ps2                     - Remove previous ps2 driver change from HAL v3.5.8
+                                        - Fix issue: Set PS2 Clock line low for 100 usec, before transmitting new data
+- ModuleDrivers\smb                     - Update SMBus Timing parameters for 100KHz
+- LogicalDrivers\ecc\hw_pka             - Fix issue #262: Missing a check for r>0 and s>0 in ECDSA signature verification
+- LogicalDrivers\ncl                    - In function NCL_ECC_ExtendedSelfTest_l r = 0 and s = 0 test case was added
+
+v3.5.8
+-------
+- ModuleDrivers\espi                    - Fixed eSPI FATAL_ERROR Response for Gamla, Alon and MRider18G (Gamla issue #670)
+                                        - Support AMD PSP RomArmor3 eSPI MAF
+- ModuleDrivers\ps2                     - Add PS2_StatusClear()
+                                        - Enable the FW to supply a start/stop functions for the PS2 1ms periodic timer
+- LogicalDrivers\rtc                    - Changed RTC_ConvertDateToSec and RTC_ConvertSecToDate from static to interface functions
+- LogicalDrivers\flash_dev              - FLASH_DEV_ReadAddresMode returns error if fails to read SFDP signature
+
+v3.5.7
+-------
+- Chips\npcx7mnx
+- Chips\npcx9mnx                        - Add CHIP_IsLresetPltrstSet function
+- Chips\npcx9mnx                        - Add PSL GPIO muxing
+- ModuleDrivers\bbrm                    - Fix BBRM_ClearStatus and BBRM_ClearIntruderAlarm functions
+- ModuleDrivers\otpi\2                  - Add four verify iterations capability for write operation
+- LogicalDrivers\bm\sw_ntil             - Fix issue #264: RSA_Verify with signature array of all 0 generates a BusFault
+                                        - Remove BM_RShift and BM_turnOnKLowestBits functions due to lack of use
+
+v3.5.6
+-------
+- Chips\npcd321h                        - Remove dependency in HAL drivers which are in ROM
+- Chips\npcx9mnx                        - Change registers fields
+- Tools\Releases\npcx9mnx               - Added utility scripts for npcx9mnx SWC HAL source release
+- ModuleDrivers\smb                     - Fixed SMBCST2 register fields
+
+v3.5.5
+-------
+- Chips\npcx9mnx                        - Fix CHIP_MuxMFT function to ignore DEVALT0 bit 6
+
+v3.5.4
+-------
+- ModuleDrivers\clk\4                   - allow update SPI divider up to 0x1F (including)
+
+v3.5.3
+-------
+- ModuleDrivers\fiu\41                  - UMA_Write dummy bytes is now zero (instead of 2)
+                                        - UMA_Read: no need for SW_CS handling, only in page program. Fix address_size
+                                        - Fix issue #872 in FL_INIT. Revert use of FIU_UMA_CTS SW_CS bit
+
+v3.5.2
+-------
+- ModuleDrivers\shm                     - Fixed SHM_INT_TYPE_T enum and SHM_ClearInterrupts function to match SHM_IntHandler
+
+v3.5.1
+-------
+- Chips\npcx9mnx                        - Fix CHIP_MuxIsGPIO function to support GPIO57
+- ModuleDrivers\clk\4                   - Fix #864 (Arbel): allow update SPI divider up to 0x1F (including)
+- ModuleDrivers\smb                     - Update SMBus Timing parameters for 100KHz/1MHz with 15MHz core clock
+- LogicalDrivers\printf                 - Add new logical driver
+- LogicalDrivers\ncl                    - Version 2.3.3
+                                        - Fix issue #862 (Arbel): Add key size to the the context
+                                        - Fix issue #859 (Arbel): Add support for non-NULL associated data in KTS (added
+                                          associatedData and and associatedDataLen arguments to NCL_RSA_Encrypt / NCL_RSA_Decrypt)
+                                        - Fix issues #863/ (KAT buffer corruption DFT for RSA and ECC verify)
+- LogicalDrivers\rsa                    - Check hash label also when label length is zero
+
+v3.5.0
+-------
+- Chips\npcm850_tip                     - Fix RNG and PKA interrupt number macros
+- Chips\npcx9mnx                        - Fix PMC related definitions
+- General                               - GCC warning fixes
+- ModuleDrivers\aes\6                   - Update issue #777 (Arbel) bypass (run 256b dummy at reset and before key size change)
+- ModuleDrivers\cr_uart                 - Fix CR_UART_SetBaudRate_l error checking
+- LogicalDrivers\ncl                    - Version 2.3.2
+                                        - Fixed return value of initialization when selftest fails
+
+v3.4.9
+-------
+- Chips\npcx9mnx                        - Fix CHIP_MuxIsGPIO function to support GPIO93 and GPIOA7
+- ModuleDrivers\espi                    - Support AMD VWs Index 51 & 53
+                                        - Fixed GPIO VWs mapping
+- LogicalDrivers\flash_dev              - Add back the FLASH_DEV_STATUS_LEN_T len parameter to FLASH_DEV_WriteStatus
+                                        - Add error checking
+- LogicalDrivers\ncl                    - version 2.3.1
+
+v3.4.8
+-------
+- Chips\npcd321h                        - Update to CR_UART module version 3
+                                        - Changed AHB6 Clock frequency from 48MHz to 96MHz
+- Chips\npcx9mnx                        - Remove cpuTypeAMD parameter from CHIP_MuxHostInterface function
+- General                               - Add parameter checks and warning fixes for security drivers:
+                                          AES, SHA, PKA, RNG, BM, DRBG, ECC and RSA
+- ModuleDrivers\aes                     - Remove AES_CAPABILITY_KEY_SELECT_AND_LOCK capability. Instead, AES_SelectKey
+                                          should be used for all drivers before setting and calculations.
+                                        - Add AES_CAPABILITY_KEY_SELECT and AES_CAPABILITY_KEY_LOCK to support key
+                                          locking API (AES_LockKey) and HW key selection (done in AES_SelectKey)
+- ModuleDrivers\gdma                    - Add GDMA_ConfigTransfer and GDMA_Start functions
+                                          (GDMA_ConfigTransfer + GDMA_Start = GDMA_Transfer)
+- ModuleDrivers\smb                     - Add Poleg issue #614 bypass: SMBus may fail to supply stop condition in Master Write operation
+- ModuleDrivers\espi                    - Add ESPI_VW_SetIndex/ESPI_VW_GetIndex functions
+                                        - Support AMD VWs Index 0x51 & 0x53
+                                        - Fixed GPIO VWs mapping
+- LogicalDrivers\flash_dev              - Fix issue: FLASH_DEV_Erase erases wrong blocks
+                                          FLASH_DEV_WriteStatus/FLASH_DEV_ReadStatus supports Status Register 1, 2 & 3
+- LogicalDrivers\ecc                    - Rename ECC_Config to ECC_SetSeed
+                                        - Blind the ECC private key before multiplication
+                                        - Add DPA protection to the ECDSA scheme
+- LogicalDrivers\ncl                    - Add NCL_ECC_SetSeed API
+                                        - Fix HKDF calculation when using SHA384 and SHA512
+                                        - Update the NCL AES according to the above AES driver changes
+                                        - Automatic selftests are performed only from NCL_<module>_Init APIs
+                                        - APIs return initialization error when calling them before module
+                                          initialization or selftest
+                                        - Remove RSA encrypt/decrypt KATs and the corresponding DFT options
+- ModuleDrivers\pka\86                  - Fix PKA_SetBIAddSub_l (set PKA_BINT_OP and set PKA_divOffsets_L.result_size
+                                          to the PKA_RESULT instead of ARG_A size)
+- ModuleDrivers\rng                     - Support ring oscillators capability (RNG_CAPABILITY_RING_OCS_CTL), define for driver #3
+
+v3.4.7
+-------
+- Chips\npcx7mnx                        - Fix CHIP_MuxGPIO function
+- Chips\npcx9mnx                        - Add CHIP_MuxIntruder and CHIP_LockIntruder functions
+- Chips\npcd321h                        - Add CHIP_BleedOffSelected function
+
+v3.4.6
+-------
+- Chips\npcx7mnx                        - Fix CHIP_MuxIsGPIO function
+
+v3.4.5
+-------
+- Chips\npcx9mnx                        - Handle eSPI on AMD in CHIP_MuxHostInterface function
+                                        - In CHIP_UnlockJtag(), ignore strap and scratch register checks for non-booter usage
+- ModuleDrivers\smb                     - Update SMBus Timing parameters for 400KHz/1MHz with 24/48MHz core clock
+- LogicalDrivers\ecc                    - Add ECC_GenPrivateKey and ECC_GenPublicKey functions (split ECC_GenKeyPair)
+- LogicalDrivers\rsa                    - Fix issue #581: added 'sigOK' argument to RSA_VerifyPkcsVer1_5 and RSA_PSSVerification
+                                          to set instead of the global RSA_params_L.outBuff
+
+v3.4.4
+-------
+- Chips\npcx9mnx                        - Fix CHIP_LockJtag function
+                                        - Add CHIP_SetLresetPltrstMode function
+- ModuleDrivers\kbc\3                   - Add KBC_ObeInterrupt_Enable function
+- ModuleDrivers\gpio                    - Add GPIO_ATOMIC_WRITE definition, for atomic GPIO write operations
+- ModuleDrivers\espi                    - Fix packed 'ESPI_PC_REQ_HDR_T' pointer alignment
+- ModuleDrivers\flm\1                   - Fix issue: FLM_CMD.CARSEL is not updated dynamically in FLM_ConfigCommand
+- ModuleDrivers\sha\3                   - Remove temporary local buffer to reduce the stack usage
+- LogicalDrivers\drbg\hw_sha            - Move DRBG_HashGen_l code to be "inline" and use a global sha handle to
+                                          reduce the stack usage
+- LogicalDrivers\ecc                    - Add ECC_ECSDSAVerify function (EC Schnorr's Digital Signature Algorithm verification)
+                                        - Fix issue #573 (ECDSA signature verification fails if digest is all-zeros)
+                                        - Add ECC_GetCurveData function to provide approved NIST curves
+                                        - Move the keySize to be stored in the data (the curve context) instead of a global variable
+- LogicalDrivers\hkdf                   - Change the driver (including API) to comply the KDF recommendations defined by NIST SP800-108
+- LogicalDrivers\ncl\hw_all             - In AES selftest, replace the CTR KAT with CBC KAT
+                                        - Add DFT (NCL_DFT_MISC_FailKAT) for KAT buffer corruption
+                                        - Support non-FIPS mode (POST and conditional ST are not mandatory)
+                                        - Disallow services before NCL initialization
+                                        - Add NCL_SHA_HKDF_Calc API (including internal selftest)
+- LogicalDrivers\flash_dev              - Fix issue: FLASH_DEV_WriteWithErase fails to erase/write
+                                        - Fix issue: interrupts might not be restored
+
+v3.4.3
+-------
+- Chips\npcm850                         - Update chip and modules according to _ARBEL_Z1_/_ARBEL_Z2_/_ARBEL_A1_
+- Chips\npcx9mnx                        - Fix CHIP_ForceVCC1Reset function
+                                        - Add PSL module driver
+- ModuleDrivers\espi                    - Add ESPI_VW_EnableBootLoad function to disable transmission of Boot Load Virtual Wires
+- ModuleDrivers\rng\2                   - Add optional SW emulation instead of real HW (can be used if FPGA/Palladium can't generate RNG)
+- ModuleDrivers\shi\3                   - Add new module version, replacing v1
+- ModuleDrivers\ssl                     - Add Firmware Bleed Off control
+- ModuleDrivers\itim8
+- ModuleDrivers\itim32                  - Fix issue: ITIM8/32_ReadCounter with APB clock might stuck in endless loop
+- ModuleDrivers\flm                     - Add FLM_Enabled function
+
+v3.4.2
+-------
+- ModuleDrivers\aes\6                   - Operate the module using double buffer
+- ModuleDrivers\rng                     - Allow using only single module or all modules
+                                        - Remove RNG_INVERSE_OUTPUT - always read bytes in reversed order
+                                        - Remove RNG_OUPUT_BY_MODULE - always group bytes from same module in buffer ordering
+
+v3.4.1
+-------
+- Common\hal_secured                    - Add common security functions, replacing defs_secured.c (file removed)
+- ModuleDrivers\flm                     - Add FLM_SELECT to FLM_Enable function
+- ModuleDrivers\rng\2                   - Set CLKP according to the maximal sampling rate
+                                        - Calculate the timeout in RNG_Init
+- LogicalDrivers\drbg                   - In DRBG_Init, allow using available entropy if exists
+                                        - Add DFT_DRBG_GenerateAndTestEntropy DFT function
+- LogicalDrivers\ecc\hw_pka             - Add identity and order public key validation to ECC_ECDHKeyExchange
+                                        - Add parameter checks and fix code analysis warnings
+- LogicalDrivers\ncl\hw_all             - Remove NCL_MISC_Init from the NCL interface
+                                        - NCL_ECC_GenKey clears the generated key pair if PCT fails
+                                        - Enter fail mode when DRBG healthtest fails
+- LogicalDrivers\rsa\hw_pka             - Add parameter checks and fix code analysis warnings
+
+v3.4.0
+-------
+- ModuleDrivers\adc                     - Remove CHNnDAT.NEW bit and ADC_DataIsReady function (due to Gamla issue #485)
+- ModuleDrivers\aes\6                   - Calculate the timeout in AES_Init instead of AES_WaitTillReady_l (major performance boost)
+- ModuleDrivers\espi                    - Move ESPI_IsChannelSlaveEnable static function to interface
+- ModuleDrivers\otpi                    - Fix issue #255: OTPI_Write does not return doesn't return error upon failure
+- ModuleDrivers\pwm                     - Add PWM_SetCycleTime function
+                                        - Change floating point to integer calculation in PWM_ConfigHeartBeat function
+- LogicalDrivers\ecc                    - Change ECC_KDF_FUNC_T type to return DEFS_STATUS instead of UINT32
+- LogicalDrivers\hkdf                   - Rename HKDF_CALC to HKDF_DeriveFromRandom
+- LogicalDrivers\ncl\hw_all             - Change RSA and ECC selftests to call SignData instead of SignHash
+                                        - In NCL_AES_GCM_Encrypt, IV is generated internally by DRBG in ENCRYPT ops and exports to the user,
+                                          and only IV size between 96 to 128 bits is supported
+                                        - Add sign KAT to RSA and ECC selftest
+                                        - RSA Encrypt KAT to RSA selftest
+                                        - Change NCL_ECC_KdfFuncPtr type to return NCL_STATUS_T instead of uint32_t
+
+v3.3.9
+-------
+- Common\hal_common.h                   - Add SECURE_MEMCPY macro function (memcpy if not defined)
+- Chips\npcx9mnx\*
+- Chips\npcd321h\*                      - Add secure memcpy function
+- ModuleDrivers\aes\6                   - Code re-factor and performance improvements
+                                        - AES_updateStage_l is modified to run loop internally
+                                        - AES_setData_l and AES_CCM_addDatahandler_l use loop instead of memcpy
+- ModuleDrivers\smb                     - Fixed issue #256: SMBus Master at 1MHz generates bad transactions
+- ModuleDrivers\rng\2                   - Get number of modules as a parameter to RNG_Init, use it instead of RNG_NUM_OF_MODULES
+                                        - Fix minor bug in byte collection order
+                                        - Add define macros for XOR,LFSR bypasses, byte collection ordering and RNG_TEST register
+- LogicalDrivers\drbg\hw_sha            - Remove DRBG_Power function
+                                        - Change DRBG_WailtValidEntropy_l ==> DRBG_WaitEntropyReady_l
+                                        - Add Entropy healthtest with RNG generation retry
+- LogicalDrivers\hkdf                   - Add new logical driver (split hmac and hkdf to separated logical drivers)
+- LogicalDrivers\ncl\hw_all             - Always use the highest DRBG security strength
+                                        - Add NCL_SHA_HMAC_* (Start/Update/Finish) APIs, rename NCL_SHA_HMAC to NCL_SHA_HMAC_Calc
+                                        - Remove rng enable/disable control from NCL_DRBG_Power (it is controlled by
+                                          the RNG driver automatically)
+
+v3.3.8
+-------
+- Chips\npcx9mnx\*                      - Fix CHIP_MuxIsGPIO() function
+                                        - Change MIWU_GPIO025 to MIWU_GPIO015 in GPIO_TO_MIWU_SRC_TABLE
+- ModuleDrivers\aes                     - Added address 4-byte alignment check for plaintext, ciphertext and tag in
+                                          CCM and GCM modes (issue #521)
+                                        - New CMAC API: AES_CMAC_Generate(). Also used for CMAC_Verify operations
+                                        - Changed API names: AES_Gcm* => AES_GCM_*; AES_Ccm* => AES_CCM_*
+                                        - Added AES_Clear(), for SSP zeroisation
+                                        - AES_CMAC_Verify returns verification result in 'isVerified' argument
+- ModuleDrivers\rng                     - Arange collected bits module by module
+                                        - Enable LFSR_BYPASS and XOR_BYPASS in RNG_STATUS register
+- ModuleDrivers\sha                     - Performance improvements (in SHA_Update and SHA_FlushLocalBuffer_l)
+- ModuleDrivers\pwm                     - Add PWM_PowerDomainSelect function
+- ModuleDrivers\ssl                     - Make LPS_SaveDisable/Restore atomic
+- LogicalDrivers\drbg\hw_sha            - Added DRBG_Clear() for SSP zeroisation
+                                        - Skip healthtest of external entropies with security strength
+                                          other than DRBG_SECURITY_STRENGTH_256b_TEST (new value)
+                                        - Removed securityStrength parameter from DRBG_Reseed
+- LogicalDrivers\ecc\hw_pka             - Fixed issue #254: ECC_PointVer verifies that input point doesn't exceed the key length
+                                        - Clear local buffers after usage
+- LogicalDrivers\ncl\hw_all             - Add NCL_<MODULE>_Clear API for each of the NCL modules
+                                        - Add 'approved mode' indicator to the module description structure
+                                        - Remove module selftest APIs (selftest is done only by NCL_MISC_SelfTest)
+                                        - Remove HKDF support
+                                        - Remove securityStrength parameter from NCL_DRBG_Reseed
+- LogicalDrivers\rsa\hw_pka             - Return verification result in 'sigOK' argument
+
+v3.3.7
+-------
+- Chips\npcm850\*                       - Updated for Z1 (Arbel)
+- Chips\npcm850_cp\*                    - Updated for Z1 (Arbel co-processor)
+- Chips\npcm850_tip\*                   - Updated for Z1 (Arbel TIP)
+- ModuleDrivers\aes                     - Enable DPA in version 7
+- ModuleDrivers\clk\4                   - Add fast skip init mode
+- ModuleDrivers\fiu\41                  - SFDP in 3 bytes dummy mode only
+- ModuleDrivers\rng\3                   - Move to DRBG
+- ModuleDrivers\tmc\4                   - New driver, version 4, which supports FSW (FULL SYSTEM WATCHDOG) only
+- ModuleDrivers\twd\4                   - New driver, version 4, with support to TWD interrupt
+
+v3.3.6
+-------
+- Chips\npcm850\*                       - Added chip "npcm850" (Arbel)
+- Chips\npcm850_cp\*                    - Added chip "npcm850_cp" (Arbel co-processor)
+- ModuleDrivers\aes                     - Fix AES_CCM tag issue
+                                        - Update address/size alignment restrictions
+                                        - Add AES_Update API for basic AES modes
+                                        - Add new module version (7)
+                                        - Support new capabilities: big/little endian, DPA countermeasure, automatic start,
+                                          key selection and key locking
+- ModuleDrivers\hfcg\1                  - Update FMCLK only if M/N values were changed
+- ModuleDrivers\flm                     - Add FLM_Config function
+- ModuleDrivers\rng                     - First activate all RNG modules, then enable
+- LogicalDrivers\drbg\hw_sha            - Add ctxIsReady parameter to the DRBG context
+                                        - Add security strength parameter to the DRBG context
+                                        - Modify entropyInput buffer to single pointer, remove relevant memcpy's
+                                        - Entropy health tests for external entropy - only security strength of 256b
+- LogicalDrivers\ncl\hw_all             - Compatibility with FIPS140-3:
+                                          Change NCL_MISC_Init to run SHA ST only, other selftests will be run on
+                                          demand (internally) when using a module's API
+                                          Change NCL_MISC_Init to run SHA ST only, other selftests will be run on
+                                          demand (internally) when using a module's API
+                                        - Add NCL_AES_Update API
+                                        - Remove NCL_RNG APIs
+                                        - NCL_DRBG_* APIs may be called with NULL context - will use internal context instead
+                                        - Add NCL_DRBG_CONTEXT_NULL_CHECK macro
+                                        - Add relevant documentation for ctxIsReady behavior
+
+v3.3.5
+-------
+- ModuleDrivers\sha                     - Add parameters check
+- ModuleDrivers\pka                     - Move PKA memory clear to the end of operation instead of start
+                                        - Use timeout instead of endless loop
+                                        - Remove support in command PKA_USER_CMD_MONT_EXP_M as it is
+                                          not supported according to spec and current usage is incorrect
+- ModuleDrivers\aes                     - Use timeout instead of endless loop
+- ModuleDrivers\rng                     - Use timeout instead of endless loop
+- LogicalDrivers\rsa\hw_pka             - Use timeout instead of endless loop
+                                        - Add parameters check
+                                        - Change RSA_KEY_SIZE_MAX from RSA_KEY_SIZE_4096b to RSA_KEY_SIZE_3072b
+                                        - Added seed field to RSA_PADDING_PARAMS (used by OAEP encoding)
+- LogicalDrivers\hmac\hw_sha            - Add parameters check
+- LogicalDrivers\ecc\hw_pka             - Changed sigOK parameter type from BOOLEAN* to DEFS_STATUS*
+                                          in ECC_ECDSAVerifyData and ECC_ECDSAVerifyHash routines
+- LogicalDrivers\drbg                   - Add new logical driver
+- LogicalDrivers\bm\sw_ntil             - Add new API routine called BM_Add
+- LogicalDrivers\ecc                    - Add new API routine called ECC_PointVer
+                                        - Under ECC_ECDSAVerifyHash/ECC_ECDSAVerifyData,
+                                          changed sigOK type from BOOLEAN* to DEFS_STATUS*
+- LogicalDrivers\ncl\hw_all             - Add NCL_MISC_* API's
+                                        - Move to Doxygen format of comments
+                                        - Changed sigOK parameter type from uint8_t* to NCL_STATUS_T*
+                                          in NCL_ECC_ECDSAVerifyHash and NCL_ECC_ECDSAVerifyData routines
+                                        - Added DFTs
+                                        - Fix issue #465: NCL_RSA_Encrypt() is addressing data size in bytes instead of DWORDs
+                                        - Added function NCL_ECC_PointVerify needed for CAVP vectors
+                                        - Remove RSA_Textbook routine from NCL APIs
+                                        - Added defines of context sizes, added relevant checks in NCL_***_InitContext() routines
+                                        - NCL_ECC_GenKey routine- Added sign/verify check on the generated key pair (FIPS requirement)
+                                        - Use DRBG only instead of RNG
+                                        - Added NCL_MISC_GetModuleDescription API to return NCL module name and version
+
+v3.3.4
+-------
+- ModuleDrivers\cr_uart                 - While reading, when FIFO & interrupt mode are enabled check the
+                                          SW buffer in order to determine if there is something to read
+                                        - While transmit process is active, activate the FIFO empty level interrupt
+                                          if there is data to transmit regardless if Tx-FIFO is full or not
+                                        - Remove static qualifier from CR_UART_IntHandler
+- ModuleDrivers\itim8                   - Remove static qualifier from ITIM8_Isr
+- ModuleDrivers\itim32                  - Remove static qualifier from ITIM32_Isr
+- ModuleDrivers\itim64                  - Remove static qualifier from ITIM64_Isr
+- ModuleDrivers\lct                     - Remove static qualifier from LCT_IntHandler
+- ModuleDrivers\pm_chan                 - Remove static qualifier from PM_CHAN_OBEHandler/PM_CHAN_IBFHandler
+- ModuleDrivers\smb                     - Add SMB_TEST_MODE to support driver validation
+                                        - Add SMB_GetSDA function to retrieves the current SDA level
+                                        - Update SMBus Timing parameters (v2.2)
+- LogicalDrivers\i2c\hw_smb             - Remove singleton from I2C_Init
+- LogicalDrivers\dcy                    - Add new logical driver
+
+v3.3.3
+-------
+- ModuleDrivers\rng                     - RNG_Enable sets/clears RNG interrupt mode ("all"/"single")
+- ModuleDrivers\dp80\5                  - Add DP80_CAPABILITY_HIGH_FREQ capability
+- ModuleDrivers\smb                     - Fix issue in SMB_EnableStartToStopTimeout
+- LogicalDrivers\tacho                  - Add MFT pin muxing configuration to TACHO_ConfigModule
+
+v3.3.2
+-------
+- Chips\npcx9mnx\*                      - Update CR_UART pin muxing for duplex capability
+                                        - Add "Set Flash over eSPI" API
+                                        - Add "Set trace enable" API (DCY)
+                                        - Add new SNT module (Snooze Timer)
+- ModuleDrivers\cr_uart\4               - Add duplex capabilities
+- ModuleDrivers\flm                     - Add new module driver
+- LogicalDrivers\i2c\hw_smb             - Fix compilation warnings when compile with GCC
+
+v3.3.1
+-------
+- Chips\npcx7mnx\*
+- Chips\npcx9mnx\*                      - Change CHIP_MuxHostSerialPort interface
+                                        - Update GPIO and MIWU related functions & tables
+- ModuleDrivers\adc\8
+- ModuleDrivers\pmc\A
+- ModuleDrivers\pwm\10
+- ModuleDrivers\mrc\9
+- ModuleDrivers\dp80\5
+- ModuleDrivers\ssl\2
+- ModuleDrivers\swc\3                   - Add new module version
+- ModuleDrivers\twd                     - Add TWD_WatchDogStart function
+- ModuleDrivers\miwu                    - Add MIWU_LowestPendingWakeup
+- ModuleDrivers\gpio                    - Add GPIO_MIWU_INTERRUPT_SUPPORT to encapsulate the MIWU interrupt handling into the GPIO driver
+- ModuleDrivers\espi                    - Add ESPI_VW_MIWU_INTERRUPT_SUPPORT to encapsulate the MIWU interrupt handling into the eSPI VW driver
+- ModuleDrivers\hfcg                    - Add HFCG_Set<Flash/Core/APB/SIO/AHB6>ClkDiv interface functions
+- ModuleDrivers\pwm                     - PWM_ConfigHeartBeat - Change Double precision floating point to Single precision
+- ModuleDrivers\dcu                     - Change DCU module number to start from DCU_MODULE_0 instead of DCU_MODULE_1
+- ModuleDrivers\smb                     - Update SMBus Timing and use tables instead of calculations
+                                        - Remove 'mode' parameter from SMB_InitModule
+                                        - Fix issue: SMB_StartStop is not handled correctly when bus is stuck or busy
+- ModuleDrivers\cr_uart                 - Fix PrintRegs function
+                                        - Add option to remove MDMA capability
+- ModuleDrivers\rng                     - Merge driver version 5 with version 2
+                                          Fix RNG_Config performance issue
+- LogicalDrivers\tacho                  - Remove hw_mft1 version
+                                          Change TACHO_Init API to be called only once
+                                          Change TACHO_ConfigModule API to configure each TACHO module instead of each MFT module
+- LogicalDrivers\bm\sw_ntil             - Add new module version
+- LogicalDrivers\ncl                    - Add 'polling' parameter to NCL_RNG_RandomData
+
+v3.3.0
+-------
+- Chips\npcm750                         - Update for Poleg freeze
+- ModuleDrivers\clk                     - Change clocks in runtime, remove Z1, add getter for all clocks
+- ModuleDrivers\mc                      - DDR init with enhanced training
+- ModuleDrivers\fuse                    - Bug Fix encoding decoding
+- ModuleDrivers\aes\10                  - Add AES_Calc
+- ModuleDrivers\gic                     - Split support for ARMCC and GNU
+- ModuleDrivers\tmc                     - Support interrupts, add touch function
+- ModuleDrivers\strp                    - Remove memSize and memSpeed strap
+- ModuleDrivers\fiu\40                  - Add manual write, needed for spi_flash driver
+- PeripheralDrivers\spi_flash           - Driver adopted from Yarkon. Add read status of multi byte, FIU_ManualProgram usage
+
+v3.2.2
+-------
+- ModuleDrivers\cr_uart                 - Fix issue #432 CR_UART_Read don’t work on FIFO mode (non DMA mode)
+
+v3.2.1
+-------
+- ModuleDrivers\aes                     - Fix issue #423 NCL: AES GCM results with ivSize=0xC are incorrect
+- LogicalDrivers\ncl                    - Fix issue #424 NCL: NCL_RSA_VerifyData() is failing
+                                        - Fix issue #427 NCL: RSA_ClearKey() is clearing the entire RSA context, including its interrupt handler
+                                        - Under NCL_*_FinalizeContext() routines - initialize context to zero
+- ModuleDrivers\cr_uart                 - Fix issue #428 CR_UART_Write & CR_UART_WriteString don’t work on FIFO mode (non DMA mode)
+- LogicalDrivers\ecc                    - Handle minerva attack, set upper bit in key generation/k used for ECDSA verify
+
+v3.2.0
+-------
+- Chips\npcx9mnx\*                      - Add chip "npcx9mnx" (Gamla)
+- Chips\npcd321h\*                      - Add chip "npcd321h" (Alon)
+- Chips\npcx7mnx
+- Chips\npcx8mnx                        - Add security modules power down macros
+- ModuleDrivers\aes                     - Code improvements
+- ModuleDrivers\espi\2                  - Update ESPI_VW_indexRange[ESPI_VW_TYPE_NUM] values
+- ModuleDrivers\lfcg\3                  - Fix issue: frcdiv legal values are not divmin/divmax
+- ModuleDrivers\gdma\3                  - Add version register
+- ModuleDrivers\pwm\9                   - Add new API function PWM_ConfigMinDutyCycle
+- ModuleDrivers\sha                     - SHA_Calc: Save-restore SHA power configuration
+- ModuleDrivers\sha\2
+- ModuleDrivers\sha\3                   - Add new module version, supporting SHA384/512
+- ModuleDrivers\aes\6
+- ModuleDrivers\cr_uart\4
+- ModuleDrivers\bbrm\3
+- ModuleDrivers\espi\8
+- ModuleDrivers\fiu\B
+- ModuleDrivers\mft\5
+- ModuleDrivers\mrc\8
+- ModuleDrivers\mswc\A
+- ModuleDrivers\pmc\9
+- ModuleDrivers\rng\5
+- ModuleDrivers\smb\B                   - Add new module version
+- LogicalDrivers\hmac
+- LogicalDrivers\rsa                    - Add support for SHA384/512 and add flow monitor to RSA_VerifyPkcsVer1_5 and RSA_PSSVerification
+                                        - Add PSS padding for sign/verify
+- LogicalDrivers\i2c                    - Update according to SMB driver B and add I2C_HANDLE_TIMEOUT to Defines.txt
+                                          to automatically handle SMB driver HW timeout
+- LogicalDrivers\ecc                    - Rename ECC_ECDSASign to ECC_ECDSASignData and added ECC_ECDSASignHash
+                                        - Rename ECC_ECDSAVerify to ECC_ECDSAVerifyData and added ECC_ECDSAVerifyHash
+                                        - Remove RNG/BM h files dependencies
+                                        - Add NULL pointers check
+                                        - Add ECC384 with SHA512 self test and ECC521 with SHA512 self test
+                                        - Enable to truncate ECC_MAX_KEY_RAND definition outside the module
+                                        - ECC_GenKeyPair: changed private key generation out of range handling
+- LogicalDrivers\ncl                    - Add new logical driver for Nuvoton Cryptographic Library
+
+v3.1.3
+-------
+- ModuleDrivers\psl                     - Add new module driver
+- ModuleDrivers\mpu                     - Fix issue: Region size of 128B do not support subregions
+                                        - Fix issue: Region minimum size is 32B instead of 16B
+v3.1.2
+-------
+- ModuleDrivers\ssl                     - Add new functions to set/get LPS_CFG1
+- ModuleDrivers\mpu                     - Add new module driver
+
+v3.1.1
+-------
+- hal.c
+- hal.h
+- hal_regs.h                            - Arrange modules in Alphabetic order
+- Chips\npcx8mnx\*                      - Update FIU/MIWU/GLUE/PWM/ADC/MRC/PMC/ESPI/GDMA modules versions
+                                        - Add 4 modules (MDMA) to GDMA
+                                        - Add 2 modules to CR_UART
+- ModuleDrivers\cr_uart                 - Add DMA capability
+- ModuleDrivers\espi                    - Support GDMA APIs with multiple modules (espi use single module)
+- ModuleDrivers\gdma                    - Support multiple modules
+- ModuleDrivers\itim64                  - Add new module driver
+- ModuleDrivers\lct                     - Add functionality
+- ModuleDrivers\fiu\A                   - Add FIU_CAPABILITY_FIXED_READ_BURST
+- ModuleDrivers\adc\7
+- ModuleDrivers\espi\6
+- ModuleDrivers\gdma\3
+- ModuleDrivers\miwu\8
+- ModuleDrivers\mrc\7
+- ModuleDrivers\pmc\9
+- ModuleDrivers\pwm\9                   - Add new module version
+- LogicalDrivers\tacho                  - Fix issue #252: TACHO_status memory overrun
+
+v3.1.0
+-------
+- ModuleDrivers\kbscan                  - Add KBSCAN_HWScan_IntEnable
+                                        - Support quasi-bidirectional
+
+v3.0.9
+-------
+- Chips\npcx7mnx                        - Add CHIP_SetLresetPltrstMode function
+- ModuleDrivers\gpio                    - Fix GPIO_Init to set the direction last
+- ModuleDrivers\espi                    - Add AW FCS to PECI over eSPI write transactions
+
+v3.0.8
+-------
+- Chips\npcx7mnx                        - Get Chip muxing status
+- ModuleDrivers\gpio                    - Get GPIO current status
+- ModuleDrivers\miwu                    - Get MIWU polarity
+
+v3.0.7
+-------
+- ModuleDrivers\mswc                    - Add Host Secure Access (HSA) capability
+- ModuleDrivers\shm                     - Add SHM Window Protection configuration
+- ModuleDrivers\smb                     - Fix issue #251: SMB Recovery is not handled correctly
+
+v3.0.6
+-------
+- ModuleDrivers\espi                    - Remove AW FCS from PECI over eSPI write transactions
+
+v3.0.5
+-------
+- ModuleDrivers\smb                     - Fix issue #250: SMB driver enters an endless loop due to a glitch on SDA
+- ModuleDrivers\pka\86                  - Added capabilities: Extended ECC, Fast Mode
+- LogicalDrivers\ecc                    - Added new logical driver
+
+v3.0.4
+-------
+- ModuleDrivers\espi                    - Call user interrupt handler upon BM transmit completion
+
+v3.0.3
+-------
+- ModuleDrivers\ssl                     - Add new function to unlock SIO
+- ModuleDrivers\shm                     - Add SHM_HOST_ACCESS macro
+
+v3.0.2
+-------
+- ModuleDrivers\espi                    - Fix PECI over eSPI
+                                        - Add eSPI configuration update general capabilities logging
+- ModuleDrivers\fiu                     - Add auto-assertion capability
+- LogicalDrivers\flash_dev              - Add FLASH_DEV_Reset to reset the SPI Flash
+
+v3.0.1
+-------
+- ModuleDrivers\smb                     - Fix SMBus HW PEC for master write transactions of at least FIFO size bytes
+
+v2.9.9
+-------
+- LogicalDrivers\flash_dev              - Make SFDP operation ATOMIC in case of 3/4-Byte Address Mode switching
+- ModuleDrivers\smb                     - Fix SMBus HW PEC for slave mode
+                                        - Add new (optional) external definition to support SW PEC - SMB_SW_PEC
+
+v2.9.8
+-------
+- Chips\npcx8mnx\*                      - Change HFCG module type from '9' to 'B'
+                                        - Change CR_UART module type from '2' to '3'
+                                        - Change CR_UART base address from 0x400C4000 to 0x400E0000
+                                        - Change CR_UART source clock from APB2 to APB4
+- ModuleDrivers\hfcg\B                  - Add APB4 clock
+- ModuleDrivers\cr_uart\3               - Added new module version
+- ModuleDrivers\lct                     - Added new module driver
+
+v2.9.7
+-------
+- ModuleDrivers\smb                     - Fix SMBus PEC for read transaction in FIFO mode
+- ModuleDrivers\smb\A                   - Use SMBus HW PEC instead of SW PEC
+- ModuleDrivers\ps2\2                   - Add Wake-up capability
+- LogicalDrivers\flash_dev              - Fix WriteWithErase
+
+v2.9.6
+-------
+- ModuleDrivers\cr_uart                 - Added external buffers option
+- ModuleDrivers\aes\5                   - Added AES_CAPABILITY_LITTLE_ENDIAN capability
+- ModuleDrivers\pka\86                  - Added new module version
+- ModuleDrivers\smb                     - Fix issue: driver detects bus arbitration loss instead of a bus error
+- LogicalDrivers\timer                  - Fix TIMER_TICKS_TO_TIME(ticks, timer) macro
+- LogicalDrivers\tacho                  - Added clock parameter to TACHO_Init routine
+- LogicalDrivers\rsa                    - Added infrastructure for new key sizes
+                                        - Use PKA modulo(HW) instead of BM modulo(SW)
+
+v2.9.5
+-------
+- ModuleDrivers\cr_uart                 - Fix 9-bit format errors
+- Chips\npcx8mnx\*                      - Change chip "npcxz9nx" to "npcx8mnx" (Arad)
+
+v2.9.4
+-------
+- ModuleDrivers\espi                    - Fix issue #401 (PC317H): Retry PECI transaction on the wrong PECI socket
+
+v2.9.3
+-------
+- ModuleDrivers\espi                    - Fix issue: OOB User Callback is not called upon OOB response error
+                                        - Change OOB API functions to local functions
+- ModuleDrivers\itim32                  - Added new module driver
+
+v2.9.2
+-------
+- ModuleDrivers\ps2                     - Fix issues
+
+v2.9.1
+-------
+- ModuleDrivers\espi                    - Fix issue: OOBCTL.OOB_FREE is not set upon OOB response error
+- ModuleDrivers\ssl                     - Add new LPS functions for Standard/DSW mode
+- ModuleDrivers\kbscan                  - Improve hardware keyboard scan functionality
+- ModuleDrivers\ps2                     - Fix ps2_channel_handler
+
+v2.9.0
+-------
+- hal.c                                 - Add HAL_Version function
+- Chips\*                               - Move Logical Device Configuration Host Registers to <chip>_regs.h file
+- Chips\npcxz9nx\*                      - Add chip "npcxz9nx" (Arad)
+- Common\hal_print                      - Support Variables print
+- Common\hal_common.h                   - Add DELAY_USEC and USEC_TO_ITERATIONS Macros
+- ModuleDrivers\mtc                     - Fix issue #247: Monotonic Counter is not set on time
+- ModuleDrivers\shm                     - Fix issue #248: Bus Fault when reading SHAW_SEM(3) register
+- ModuleDrivers\cr_uart                 - Fix issue #249: cr_uart driver transmit data with delay between
+                                          successive bytes when transmitted at 3Mb/s baud rate
+- ModuleDrivers\espi                    - Fix PECI over eSPI OOB
+- ModuleDrivers\espi\6                  - Add eSPI SAF Capability
+- ModuleDrivers\pka\86                  - Add new version of PKA driver
+- ModuleDrivers\fiu                     - Modify FIU_PageWrite function to not exit 4-byte address mode
+- ModuleDrivers\fiu\A
+- LogicalDrivers\flash_dev              - Add Master Capability
+
+v2.8.9
+-------
+- ModuleDrivers\smb                     - Fix issue #246: Master Transaction might be aborted before even started
+- LogicalDrivers\i2c                    - Add I2C_StateIsBusy
+
+v2.8.8
+-------
+- ModuleDrivers\espi                    - Add eSPI OOB CrashLog support
+- LogicalDrivers\flash_dev              - Fix issue #245: FIU driver relay on HFCG function
+
+v2.8.7
+-------
+- Chips\npcd318h                        - Add CHIP_GetTestID
+
+v2.8.6
+-------
+- Chips\npcx7mnx                        - Split CHIP_MuxSMBChannel() function into 2 functions
+- ModuleDrivers\miwu                    - Add MIWU_EnableInput for setting/clearing bits in the WKINEN register
+- ModuleDrivers\ps2                     - Fix ps2_channel_handler error handling
+
+v2.8.5
+-------
+- ModuleDrivers\adc                     - MFT module defined by chip for ADC Timer Conversion
+
+v2.8.4
+-------
+- General                               - Update copyrights to 2018
+
+v2.8.3
+-------
+- ModuleDrivers\smb                     - Translate Master Transaction with nwrite & nread = 0 to Quick Command
+                                        - Use SMB_MASTER_SUPPORT/SMB_SLAVE_SUPPORT instead of !SMB_SLAVE_ONLY/!SMB_MASTER_ONLY
+- LogicalDrivers\i2c                    - Use I2C_MASTER_SUPPORT/I2C_SLAVE_SUPPORT instead of !I2C_SLAVE_ONLY/!I2C_MASTER_ONLY
+
+v2.8.2
+-------
+- Chips\npcx7mnx                        - Fix issue #241: No support for pin muxing in CR_UART driver
+- ModuleDrivers\cr_uart                 - Fix issue #244: CR_UART interrupt handler handle the 2 module in wrong way
+- ModuleDrivers\smb                     - Fix issue #347 (PC317H): SMBus SDA line may stuck at low and cannot be released
+                                        - Separate SMB_InterruptHandler to several functions handling the various operations
+- Chips\*
+- ModuleDrivers\cr_uart
+- ModuleDrivers\dcu
+- ModuleDrivers\itim8
+- ModuleDrivers\mft
+- ModuleDrivers\smb                     - Interrupt to module mapping
+
+v2.8.1
+-------
+- LogicalDrivers\flash_dev              - Support PollOnBusyBit for Core Clock > 50MHz
+- ModuleDrivers\cr_uart                 - Fix issue #242: CR_UART driver corrupted TX in interrupt mode in module 2
+                                        - Fix issue #243: CR_UART_Read() in module 2 returns error
+
+v2.8.0
+-------
+- Chips\npce78nx\*                      - Remove chip "npce78nx" (uRider8B)
+- Chips\npce79nx\*                      - Remove chip "npce79nx" (uRider9A)
+- Chips\npce69nx\*                      - Remove chip "npce69nx" (uRider9B)
+- Chips\npce9mnx\*                      - Remove chip "npce9mnx" (uRider11A)
+- Chips\npcxzmnh\*                      - Remove chip "npcxzmnh" (MRider16)
+- Chips\npcd314h\*                      - Remove chip "npcd314h" (SIO14)
+- Chips\ntsc500\*                       - Remove chip "ntsc500"  (MFTS)
+- ModuleDrivers\dcu                     - Support Duty Cycle Output Cycles
+- ModuleDrivers\smb                     - Add SMB_StartStop
+- LogicalDrivers\flash_dev              - Support write encrypted and/or authenticated flash option
+                                        - Support verification of written data
+                                        - Support erase in incremental abortable chunks
+
+v2.7.8
+-------
+- Chips\npcd318h\npcd318h.c             - Fix GPIO to DEVALT mapping
+- ModuleDrivers\adc                     - Fix issue: ADC_Reset does not clear status bits
+
+v2.7.7
+-------
+- Chips\npcx7mnx\npcx7mnx.h             - Fix SMBus wake-up sources
+- ModuleDrivers\espi                    - Fix issue: EC18 fails to wake up from LPM via eSPI Configuration Updated
+- ModuleDrivers\otpi                    - Add OTPI_ReadProtected and OTPI_WriteProtected
+
+v2.7.5
+-------
+- ModuleDrivers\miwu                    - Re-design to enhance interrupt response time
+
+v2.7.4
+-------
+- Chips\npcd318h\npcd318h.c             - Fix SMB modules source clock mapping
+- ModuleDrivers\hfcg                    - For frequencies above 50MHz, XF_RANGE bit must be set to 1
+- ModuleDrivers\espi                    - Fix issue #240: FW receives an error when reading a VW value
+                                        - Support UART clock input setting
+- ModuleDrivers\ssl                     - Fix issue #328: A single write to LPS_CFG1 may not change the register value when
+                                          LPS lock is enabled
+- ModuleDrivers\adc                     - Support ADC Turbo Speed Mode
+- ModuleDrivers\cr_uart\1               - USTAT.ERR is the OR of PE, FE, DOE and BKD (add the BKD)
+- ModuleDrivers\cr_uart\2               - Add support to multiple modules & FIFO mode
+
+v2.7.3
+-------
+- Chips\npcx7mnx\npcx7mnx.c             - Fix routine CHIP_SMBPullUp to configure pull ups correctly and support new SMB modules
+                                        - Fix routine CHIP_MuxSMBChannel - Mux for SMB modules 4,5,6 was not set correctly
+- ModuleDrivers\sib                     - Fixed issue: Timing violation when changing the CSAE bit during eSPI host transaction
+
+v2.7.2
+-------
+- ModuleDrivers\espi                    - Fix issue #239: eSPI MAF fails on second transaction in Auto-only interrupt mode
+
+v2.7.1
+-------
+- ModuleDrivers\scs                     - Add DivideByZeroEnable and EnableTrap functions
+- ModuleDrivers\shm\1                   - Fix issue #238: SHM_Config accidentally clears some bits in SMC_CTL
+- ModuleDrivers\espi                    - Move IRQ Deassertion update to ESPI_VW_Config
+                                        - Check if VW channel is enabled before Set/Get wire
+
+v2.7.0
+-------
+- ModuleDrivers\cr_uart\1               - Add support to read data in polling mode
+                                        - Fix CR_UART_SetBaudRate_l routine - remove division by zero bug in baud rate calculation
+
+v2.6.9
+-------
+- Chips\npcx7mnx\npcx7mnx.c             - Fix issue #235: mRider17 chip file do not configure CR UART mux correctly
+
+v2.6.8
+-------
+- ModuleDrivers\smb\A                   - Reverted the SMBnT_OUT register definition change (MRider17 issue #254)
+- ModuleDrivers\nvic                    - Fix issue: SVC/PendSV are not defined as no return for ThreadX v5.7
+
+v2.6.7
+-------
+- ModuleDrivers\smb                     - Fix issue #244 (mrider17): Update SCLFRQ_MIN value
+- ModuleDrivers\smb\6                   - Fix issue #232: SMB: Bank is switched before FIFO mode is actually determined
+- ModuleDrivers\smb\A                   - Fix issue #230: SMB: SMBnT_OUT is not defined in the Common registers
+                                        - Fix issue #231: SMB: SMB_WriteSCL/SMB_WriteSDA routines don't switch bank
+
+v2.6.6
+-------
+- Chips\npcxzmnh\npcxzmnh.c
+- Chips\npcx5mng\npcx5mng.c
+- Chips\npce5m6h\npce5m6h.c
+- Chips\npcx7mnx\npcx7mnx.c             - Remove SWC module
+- ModuleDrivers\swc\2                   - Added new module version
+
+v2.6.5
+-------
+- Chips\npcx7mnx\npcx7mnx.c             - Fix CHIP_MuxADC function
+
+v2.6.4
+-------
+- LogicalDrivers\hmac                   - Added new logical driver for Hash-based cryptography (HMAC/HKDF)
+- ModuleDrivers\smb\6                   - Fix issue #226: SMBus: Endless master read block protocol
+                                        - Fix issue #227: SMB_NO_DATA_IND missing from slave in FIFO mode
+- ModuleDrivers\espi                    - Add a dedicated callback function for OOB_HW
+- ModuleDrivers\fiu\2
+- LogicalDrivers\flash_dev              - Fix issue #229: Incomplete 2 chip select support
+
+v2.6.3
+-------
+- ModuleDrivers\espi\5                  - Fix according to documentation issue #229: eSPI_SIF: Edge type VW must be set to
+                                          inactive state by SW before an additional assertion of the same VW
+- ModuleDrivers\espi                    - Support OOB USB commands
+- ModuleDrivers\fiu\2                   - Added missing FIU_GetReadMode function
+- ModuleDrivers\pka                     - Replace PKA_BusyWait function with PKA_IsBusy
+- LogicalDrivers\rsa                    - Replace RSA_BusyWait function with RSA_IsBusy
+                                        - Support Sign/Verify/Encrypt/Decrypt operations
+
+v2.6.2
+-------
+- ModuleDrivers\hfcg\8                  - Fix issue #228: HFCG: clock frequency table in hfcg driver is not updated for driver 8
+
+v2.6.1
+-------
+- ModuleDrivers\smb\6                   - Fix issue #225: SMBus: Too many interrupts for FIFO write
+- LogicalDrivers\i2c                    - Check Module-busy instead of Bus-busy to keep backward compatibility
+
+v2.6.0
+-------
+- Common\Print\*                        - Support Hexadecimal HAL Versions print
+- Chips\npcd318h\*                      - Changed chip "npcd317h" to "npcd318h"
+- ModuleDrivers\pmc                     - Move chip-specific power down registers to chip files
+- ModuleDrivers\adc                     - Support multiple adc modules
+- ModuleDrivers\nvic                    - Support up to 96 interrupts
+                                        - Fix issue #63: Hard faults upon no-return SVC/PendSV functions
+- ModuleDrivers\dcu\2
+- ModuleDrivers\spi\3
+- ModuleDrivers\dp80\4                  - Added new module versions
+- ModuleDrivers\sha                     - Fix issue #62: SHA driver: SHA1 calculation is not working properly
+
+v2.5.9
+-------
+- ModuleDrivers\smb
+- LogicalDrivers\i2c                    - Separate Bus-busy and Module-busy functionality
+
+v2.5.8
+-------
+- ModuleDrivers\dp80\3                  - Added High-Frequency Clock capability
+- LogicalDrivers\acpi
+- LogicalDrivers\i2c                    - Pass 0 instead of NULL for don't-care arguments
+                                          (NULL might be defined differently by the Compiler)
+- ModuleDrivers\gic
+- ModuleDrivers\nvic                    - Support ARM GNUC Interrupt Service Routine declaration
+- ModuleDrivers\smb                     - Clear EO_BUSY pending bit before enabling SMB timeout
+- ModuleDrivers\sdp                     - Added new module driver (Simple Debug Port)
+- ModuleDrivers\espi                    - eSPI VW Configuration Re-design
+- ModuleDrivers\gdma
+- ModuleDrivers\pka
+- LogicalDrivers\rsa                    - Support parallel GDMA/SHA/PKA hardware operations
+
+v2.5.7
+-------
+- ModuleDrivers\espi                    - Fix issue #61: Fail to read PCH Temperature via eSPI OOB
+
+v2.5.6
+-------
+- Chips\npcx7mnx\*                      - Added chip "npcx7mnx" (MRider17 HP/GM)
+- Chips\npcd317h\*                      - Added chip "npcd317h" (SIO18)
+- ModuleDrivers\smb\8
+- ModuleDrivers\shm\C
+- ModuleDrivers\pmc\7
+- ModuleDrivers\pka\5
+- ModuleDrivers\lfcg\6
+- ModuleDrivers\hfcg\8
+- ModuleDrivers\gpio\4
+- ModuleDrivers\fiu\9
+- ModuleDrivers\espi\5                  - Added new module versions
+- ModuleDrivers\espi                    - Added support for PECI over ESPI
+                                          Remove last parameter from ESPI_VW_ConfigIndexOut,
+                                          Added new APIs for the removed configuration according to ESPI_VW enum
+- ModuleDrivers\gdma                    - Added new API functions: GDMA_GetDataTransferWidth, GDMA_SetDataTransferWidt
+- ModuleDrivers\aes                     - AES_Calc function: Enable CTR mode decryption operation
+                                          and perform encryption since it's symmetric operation in CTR mode
+- ModuleDrivers\otpi                    - OTPI_SetClkPresc_l Bug fix - check OTPI is idle before changing clock and return
+                                          DEFS_STATUS_OK when OTPI is already enabled
+- ModuleDrivers\rng                     - Added RNG_IntHandler to API functions
+
+v2.5.5
+-------
+- ModuleDrivers\smb\6                   - Fix issue #55 also for FIFO mode
+                                        - Remove NPCE2MNX_ERRATA_FIX
+- LogicalDrivers\flash_dev              - Fix issue #59: Wrong read of JEDEC ID
+                                        - Fix issue #60: Fails to read SFDP on 32MB Flash
+
+v2.5.4
+-------
+- ModuleDrivers\smb\6                   - Fix issue #55: NACK on the first byte read, after an
+                                          unacknowledged I2C byte read which is followed by a multi-byte read
+                                        - Support SMB Slave recovery
+                                        - Remove SMB Bus Timeout from SMB_InitModule
+                                        - Remove SMB_Recovery from SMB_InterruptHandler, perform only SMB_MasterAbort
+- ModuleDrivers\syst                    - Fix issue #57: SysTick cannot be configured to more than 21ms with
+                                          48MHz core clock
+                                        - Fix issue #58: Missing Parameter Check in Timer-related Modules
+- ModuleDrivers\twd                     - Fix issue #58: Missing Parameter Check in Timer-related Modules
+- ModuleDrivers\espi                    - Support Boot from eSPI (BOOT_LOAD_FROM_ESPI)
+
+v2.5.3
+-------
+- Chips\npcxzmnh\npcxzmnh.c
+- Chips\npcx5mng\npcx5mng.c
+- Chips\npce5m6h\npce5m6h.c             - Added CHIP_SMBLowVoltageEnable(), selects voltage level for SMB module
+- ModuleDrivers\smb\6                   - Handle Bus arbitration loss (BER) in case of multi-master
+- ModuleDrivers\espi                    - Support a configurable eSPI Host Independence (Auto Handshake)
+
+v2.5.2
+-------
+- ModuleDrivers\stc                     - Remove entire module driver (maintained under secured AccuRev server)
+- ModuleDrivers\tis                     - Remove driver inclusion (maintained under secured AccuRev server)
+- ModuleDrivers\fiu                     - Remove version 80h (maintained under secured AccuRev server)
+- ModuleDrivers\scfg                    - Driver is no longer in use. All Chip-Specific core-side registers and
+                                          functionality is defined in chip-specific files
+- ModuleDrivers\sib                     - Remove lock violation function/register
+- ModuleDrivers\shm                     - Added ESHM registers for Win 3/4
+                                        - Remapping of all the SHM HOST runtime registers
+- ModuleDrivers\dp80                    - Added new module driver (Debug Port 80), separated from SHM
+- Chips\*                               - Update MRider/SIO LDN/SIB assignments
+
+v2.5.1
+-------
+- ModuleDrivers\smb\6                   - Update Master/Slave clock timing configuration
+                                        - Fix issue #54: SDA stuck at low and then released caused a core watchdog
+                                        - Added Timeout capability
+- ModuleDrivers\nvic                    - Fix interrupts priority levels
+
+v2.5.0
+-------
+- General                               - Support SWC_HAL_FLAT
+                                        - Update copyright to 2016
+
+v2.4.6
+-------
+- LogicalDrivers\i2c                    - Add I2C_Slave_Recover
+                                          On I2C_Slave_DeInit : Don't check state, disable before zeroing the counters
+
+v2.4.5
+-------
+- Chips\npcx5mng\*                      - Added chip "npcx5mng" (MRider15 General Market)
+- ModuleDrivers\pwm                     - Mux PWM after performing all configuration steps
+- ModuleDrivers\espi                    - Support eSPI Flash Access and Peripheral Channel Bus Mastering for MRider16
+
+v2.4.4
+-------
+- version.h                             - Added fourth digit for secured HAL patches
+- Chips\chip_regs.h                     - Added new file, includes chip-specific registers
+- Chips\npcm750\*                       - Linux changes. update drivers number
+- Chips\npcm750_cp\*                    - Change CP-BMC windows handling
+- ModuleDrivers\smb\6                   - Support SMB_WRAP_AROUND_BUFFER for EEPROM emulation
+                                        - Support restart between slave reads
+                                        - Pec tables and functions removed if SMB_CAPABILITY_HW_PEC_SUPPORT defined
+                                        - Workaround HW issue in Poleg: SMB_SW_BYPASS_HW_ISSUE_SMB_STOP
+                                        - Return fast from NACK from the interrupt handler
+                                        - Bug fix: info on slave read sometimes fails (depends on the FIFO)
+                                        - Added SMB_InterruptIsPending and SMB_ReEnableModule functions
+- ModuleDrivers\mc                      - Support A1. add support for sweep of trim values. change dll values. hal print updated
+- ModuleDrivers\fuse                    - Avoid compilation error if sha and aes are not defined
+- ModuleDrivers\clk                     - Update the "by strap" value (speed and size)
+- ModuleDrivers\otpi\1                  - Fix mrider16 issue #302: Booter updates SioFwHdrInvalid erroneously
+- ModuleDrivers\gpio\3                  - Added new functions for port-level operations
+- ModuleDrivers\icu\0                   - Dedicated driver for secure projects (no inheritance)
+- LogicalDrivers\i2c                    - Support restart between slave reads (use I2C_Slave_ReadContinue)
+                                        - Added I2C_Slave_Add function
+                                        - Added I2C_InterruptIsPending function
+                                        - I2C_Slave_Init does not set slave address
+                                        - Bug fixes to support I2C_SLAVE_ONLY
+- LogicalDrivers\flash_dev              - Remove FIU security settings
+                                        - Fix issue in FLASH_DEV_EnableQuadRead
+- LogicalDrivers\tacho\hw_mft2          - Allow slow (LFCG) or fast (prescale) clock source
+
+v2.4.3
+-------
+- ModuleDrivers\espi\2                  - Fix issue #52: Ungraceful eSPI reset might take Core and Host Out of Sync
+- ModuleDrivers\smb\6                   - Fix Master/Slave clock timing configuration
+
+v2.4.2
+-------
+- ModuleDrivers\smb\6                   - Support enhanced SMB Recovery (toggle SCL)
+- ModuleDrivers\pm_chan                 - Fix issue #50: PM Channel: Multi-channel support is erroneous
+                                        - Fix PC315H issue #671: Each access to PM Channel control register should be atomic
+- ModuleDrivers\dwt                     - Added new module drivers (Data Watchdog and Trace)
+- ModuleDrivers\adc                     - Fix issue #51: ADC one shot conversion following ADC repetitive conversion might fail
+
+v2.4.1
+-------
+- LogicalDrivers\i2c
+- ModuleDrivers\smb\6                   - Fix issue #48: Chip Hangs in case SMBus Device Reports Zero Byte-Count for Block Read
+- ModuleDrivers\peci                    - Fix issue #49: PECI driver does not set the "retry" bit when needed
+
+v2.4.0
+-------
+- hal_regs.h                            - Support HAL Registers Direct-Access
+- SkipCopyright.txt                     - Added SkipCopyright.txt
+- Common\Print\*                        - Support HAL Registers and HAL Versions print
+- Chips\npcxzmnh\npcxzmnh.h             - Added Dynamic RAM support
+- ModuleDrivers\icu
+- ModuleDrivers\nvic                    - Dynamic HW dispatch Table Support
+- ModuleDrivers\pmc\4                   - Added power down capability
+- ModuleDrivers\gpio\1                  - Added host run-time registers
+- ModuleDrivers\clk\3                   - Split to Z1\Z2 configuration, added support for timestamp measuring
+- ModuleDrivers\pka
+- ModuleDrivers\otpi                    - Bug fix: Configure prescaler only when module is disabled
+- ModuleDrivers\lfcg                    - Ensure FRCDIV is between FRCDIV_MIN and FRCDIV_MAX
+- LogicalDrivers\rsa                    - Defined a new structure for PKA/RSA calculations (ARRAY_32_T)
+- LogicalDrivers\acpi                   - Handle Protocol violation, where input data received without a preceding command
+                                        - Handle illegal command
+- LogicalDrivers\i2c                    - Fix issue #47: I2C driver does not properly support working with both
+                                          Master and Slave on the same channel
+
+v2.3.3
+-------
+- Chips\npcd315h\npcd315h_if.h          - Added GPIO host registers
+
+v2.3.2
+-------
+- ModuleDrivers\shm                     - Added DP80_ReadEx function
+- LogicalDrivers\i2c                    - Added I2C_Master_Recover function
+
+v2.3.0
+-------
+- Chips\npcxzmnh\*                      - Added chip "npcxzmnh" (mRider16)
+- ModuleDrivers\otpi                    - Added new One Time Programmable Interface (OTPI) module driver
+- ModuleDrivers\fiu\8
+- ModuleDrivers\gdma\2
+- ModuleDrivers\hfcg\7
+- ModuleDrivers\mrc\6
+- ModuleDrivers\pmc\7                   - Added new module versions
+- ModuleDrivers\adc
+- ModuleDrivers\nvic
+- ModuleDrivers\pka                     - Added SW reset capability
+- ModuleDrivers\shm                     - Added eSPI callback
+
+v2.2.3
+-------
+- ModuleDrivers\pmc                     - Bug fix: wait for ADC registers to become accessible when exiting low power mode
+- ModuleDrivers\adc                     - Add wakeup support; handle only enabled interrupt events
+- ModuleDrivers\mft\4                   - Added new module version; supports MFT low-power mode
+
+v2.2.2
+-------
+- Common\hal_ethernet.h                 - Import file from BMC_HAL
+- ModuleDrivers\gpio                    - Change GPIO driver version from 4 to 40 (directory + chip H)
+- ModuleDrivers\adc                     - Put in comment in chip H file
+- ModuleDrivers\aes                     - Change directory from 5 to 10, put in comment in chip H file
+- ModuleDrivers\gic                     - Change GIC driver version from 3 to 2 (directory + chip H)
+- ModuleDrivers\des                     - Change DES driver version from 2 to 0 (directory + chip H)
+- ModuleDrivers\gmac                    - Change GMAC driver version from 3 to 4 (directory + chip H)
+- ModuleDrivers\emc                     - Change EMC driver version from 3 to 1 (directory)
+- ModuleDrivers\sd                      - Change SD driver version from 1 to 10 (directory + chip H)
+- ModuleDrivers\pwm                     - Add comment to chip H file /* Should be 10 : to be written. Using 1 in the meanwhile */
+
+v2.2.1
+-------
+- ModuleDrivers\twd                     - Fix HAL issue #46: Reloading the timer may clear Watchdog reset status
+- ModuleDrivers\sib                     - Fix MRider15 issue #689: SHM transactions are halted/stuck when EC calls WFI
+
+v2.2.0
+-------
+- Chips\npcm750\*                       - Added chip "npcm750" (Poleg)
+- Chips\npcm750_cp\*                    - Added chip "npcm750_cp" (Poleg co-processor)
+- PeripheralDrivers\eth_phy
+- PeripheralDrivers\spi_flash           - Added new Peripheral drivers
+- ModuleDrivers\clk
+- ModuleDrivers\des
+- ModuleDrivers\ece
+- ModuleDrivers\emc
+- ModuleDrivers\fuse
+- ModuleDrivers\gic
+- ModuleDrivers\gmac
+- ModuleDrivers\mc
+- ModuleDrivers\sd
+- ModuleDrivers\strp
+- ModuleDrivers\tmc
+- ModuleDrivers\uart
+- ModuleDrivers\vcd                     - Added new module drivers
+- ModuleDrivers\espi\3
+- ModuleDrivers\fiu\40
+- ModuleDrivers\gpio\4
+- ModuleDrivers\aes\5                   - Added new module versions
+
+v2.1.7
+-------
+- ModuleDrivers\cr_uart                 - Fix issue #45: CR UART does not support repetitively printf/scanf in interrupt mode
+
+v2.1.6
+-------
+- ModuleDrivers\smb\6                   - Added End Of Busy capability
+- ModuleDrivers\nvic                    - Added ThreadX support
+- ModuleDrivers\espi                    - AMTBFULL bug fix
+                                        - Changed eSPI event handling order
+- ModuleDrivers\shm                     - Changed Debug Port 80 Interface
+- ModuleDrivers\shm\6                   - Added new version of SHM driver
+- ModuleDrivers\fiu                     - Fix issue #42: Random SPI read failure following SPI write operation
+- ModuleDrivers\miwu                    - Fix issue #43: MIWU interrupt isn't enabled without specifying a user handler
+- ModuleDrivers\twd                     - Fix issue: TWD_TimerConfig might return without restoring interrupts
+- ModuleDrivers\cr_uart                 - Fix issue #44: Switch from interrupt to polling stuck in endless CR UART interrupt
+                                        - Define a separate CR UART buffer for Tx and Rx
+                                        - Added 9-bit under external capability
+- LogicalDrivers\bm                     - BM_Div bug fix
+- LogicalDrivers\acpi                   - Rename ACPI Read/Write functions
+
+v2.1.5
+-------
+- ModuleDrivers\lfcg                    - Fix issue #37: LFCG_GetCalibration() does not wait for reference clock to toggle
+- ModuleDrivers\ssl                     - Added new System Storage and Logic (SSL) driver
+
+v2.1.4
+-------
+- ModuleDrivers\fiu                     - Support 2 chip select
+- ModuleDrivers\espi                    - Support Flash-Access and OOB
+- ModuleDrivers\gdma                    - Support eSPI
+- ModuleDrivers\rng                     - Bug fix: Using the default Clock Prescaler hides a performance penalty
+
+v2.1.3
+-------
+- ModuleDrivers\fiu\7
+  LogicalDrivers\flash_dev              - Support 4 byte address
+- ModuleDrivers\gdma
+- ModuleDrivers\pka
+- ModuleDrivers\mtc                     - Move interrupt handler to interface
+- ModuleDrivers\twd                     - clear Watch-Dog reset event in a separate function
+
+v2.1.2
+-------
+- ModuleDrivers\espi                    - Added new Enhanced Serial Peripheral Interface (eSPI) driver
+
+v2.1.1
+-------
+Minor fixes, mainly for DTIO FDK release
+
+v2.1.0
+-------
+- Chips\npce5m6h\*                      - Added chip "npce5m6h" (MRider15 HP)
+- Chips\npcd315h\*                      - Support BMC features in SIO15 (1 additional Core UARTs and 2 additional SMBs)
+- ModuleDrivers\mrc                     - Add Main RAM Control (MRC) module
+- ModuleDrivers\kbc                     - Add KeyBoard Controller (KBC) Module
+- ModuleDrivers\bbrm                    - Add Battery Backed RAM (BBRM) module
+- ModuleDrivers\ps2\2                   - Added new version of PS/2 driver
+- ModuleDrivers\scs                     - Enable Cortex-M4F FPU hardware
+- ModuleDrivers\twd                     - Add routine to check if WatchDog is running
+- LogicalDrivers\i2c
+- ModuleDrivers\smb                     - Add SW PEC (CRC8) support
+- ModuleDrivers\shm                     - Add Interrupt on Offset support
+- ModuleDrivers\pwm                     - Add Visual Heart Beat support
+- ModuleDrivers\kbscan                  - Add hardware scan support
+- ModuleDrivers\pm_chan                 - Add status read/write functions
+- ModuleDrivers\mswc                    - Add Host modules Configuration Base Address Register (HCBAR) support and Core ID support
+- ModuleDrivers\miwu                    - Add level detection support
+- ModuleDrivers\pmc                     - Add Deep Sleep Power Control and Power Down support
+- ModuleDrivers\itim8                   - Allow manual prescaler and counter configuration (ITIM8_StartPeriodicEventEx)
+- ModuleDrivers\adc                     - Add Internal VREF support
+- ModuleDrivers\dac                     - Handle DAC enabling/disabling according to the given voltage (same as PWM)
+- ModuleDrivers\lfcg                    - Fix FRCDIV range error check, fix DIVCOR1_DIVMIN,DIVCOR2_DIVMAX fields configuration
+
+v2.0.4
+-------
+- ModuleDrivers\gpio\*                  - Added GPIO_CAPABILITY_32, added output type
+- ModuleDrivers\fiu\*
+  LogicalDrivers\flash
+  LogicalDrivers\flash_dev              - Support multiple fiu modules
+
+v2.0.3
+-------
+- General                               - Use the same includes convention for all drivers
+- Chips\npcd314h\*                      - CHIP_LedBrightnessEnable: Support Led Brightness Control
+- Chips\npcd315h\*                      - Added chip "npcd315h"
+- ModuleDrivers\icu                     - Bug fix: Clearing an interrupt, causes the pending interrupts resides
+                                          on the same register to be cleared as well
+- ModuleDrivers\adc                     - Add ADC Channel Delay Support
+- ModuleDrivers\pka                     - Rename PKA driver version to 2, add version 4
+- ModuleDrivers\sha
+  ModuleDrivers\pka
+  LogicalDrivers\rsa                    - Update drivers based on SWC group internal review
+                                        - Update all RSA-related function parameters to 32-bit
+- ModuleDrivers\smb                     - Bug fix: SMB_BusIsBusy should use BUSY and SLVSTP bits as busy indication
+                                        - Bug fix: SMB_Stop should wait till bit is cleared to ensure STOP generation
+- ModuleDrivers\swc                     - Add Set/Get functions for FWLedControl
+- ModuleDrivers\pm_chan                 - Rewrite driver to support Host SCI/SMI/IRQ and Core interrupts
+- ModuleDrivers\fiu                     - Support a configurable timeout on FIU execution
+                                        - Fix a bug related to multiple flash support in FIU_WritePage
+                                        - Added new version of FIU driver (version 6)
+- ModuleDrivers\twd\4                   - Added new version of TWD driver
+- ModuleDrivers\itim8\4                 - Added new version of ITIM8 driver
+- ModuleDrivers\pm_chan\3               - Added new version of PM_CHAN driver
+- ModuleDrivers\peci\3                  - Added new version of PECI driver
+- ModuleDrivers\adc\4                   - Added new version of ADC driver
+- ModuleDrivers\rng                     - Added new module driver for RNG module
+- ModuleDrivers\cr_uart                 - Added new module driver for CR_UART module
+- ModuleDrivers\aes                     - Added new module driver for AES module (based on Secure-IC IP)
+- ModuleDrivers\otp                     - Support Read/Write protect
+- ModuleDrivers\sio                     - Re-design. Moved all registers to chip files
+- LogicalDrivers\acpi                   - Added new logical driver for ACPI module
+- LogicalDrivers\bm                     - Replace the BigMath library with Secure-IC IP
+- LogicalDrivers\flash
+  LogicalDrivers\flash_dev              - Separate spi_flash driver to high-level (flash) and low-level (flash_dev) drivers
+
+
+v2.0.2
+-------
+- General                               - Modify HAL processing to support source package preparation
+                                        - Support minimal inclusion on chip-level
+- ModuleDrivers\tacho                   - Validate TACH configuration
+- ModuleDrivers\shm                     - Divide Init function into atomic operations
+- ModuleDrivers\mtc                     - Added new module driver for MTC module
+- LogicalDrivers\rtc                    - Added new Logical driver for RTC module
+
+
+v2.0.1
+-------
+- General                               - Pass UINT instead of UINT16 to INTERRUPTS_SAVE_DISABLE and INTERRUPTS_RESTORE
+                                          macros to support both CR and ARM architecture
+                                        - Pass BOOLEAN instead of UINT16 to INTERRUPT_SAVE_DISABLE and INTERRUPT_RESTORE
+                                          macros to support both CR and ARM architecture
+                                        - Updated peripheral source clocks
+- Chips\npcd314h\*                      - Bug Fix: When setting GPIO port number there was a check whether the gpio
+                                          number is less than 40 instead of 40h
+- ModuleDrivers\nvic                    - Bug fix: Vector table alignment should be power of two whose alignment value
+                                          is at least (Number of Exceptions x 4), with a minimum alignment of 128 bytes,
+                                          where Number of Exceptions = traps + interrupts
+                                        - Bug fix: Disabling/clearing an interrupt, causes the enabled/pending
+                                          interrupts from the same group to be disabled/cleared as well
+- ModuleDrivers\dcu                     - Support separate interrupt for each dcu module
+- ModuleDrivers\scs                     - Added routine which returns the current pending interrupt number
+                                        - Bug fix: VECTACTIVE field in ICSR register was 8 bits instead of 9
+- ModuleDrivers\adc                     - Bug fix: Register pre-requisite twice, instead of post-requisite
+- ModuleDrivers\twd                     - Added support for twd through miwu interrupt
+                                        - Bug fix: Calculation of minimum/maximum time to be configured was incorrect
+- ModuleDrivers\syst                    - Bug fix: Calculation of minimum/maximum time to be configured was incorrect
+- ModuleDrivers\shm                     - Bug fix: HOSTWAIT bit is cleared before it should be cleared
+- ModuleDrivers\hfcg                    - Bug fix: Fix APBDIVx and SIODIV calculation
+- ModuleDrivers\cirled                  - Take out CIRLED_MFT_MODULE/CIRLED_MFT_TIMER, to allow each chip to specify its
+                                          own MFT for CIR LED blinking
+
+v2.0.0
+-------
+- General                               - Added ARM support
+- Chips\npcd314h\*                      - Added chip "npcd314h"
+- ModuleDrivers\peci\2                  - Added new version of PECI driver
+- ModuleDrivers\twd\3                   - Added new version of TWD driver
+- ModuleDrivers\itim8\3                 - Added new version of ITIM8 driver
+- ModuleDrivers\adc\3                   - Added new version of ADC driver
+- ModuleDrivers\pmc\4                   - Added new version of PMC driver
+- ModuleDrivers\shm\5                   - Added new version of SHM driver
+- ModuleDrivers\hfcg\5                  - Added new version of HFCG driver
+- ModuleDrivers\fiu\4                   - Added new version of FIU driver (for npce9mnx)
+- ModuleDrivers\fiu\5                   - Added new version of FIU driver
+- ModuleDrivers\miwu\5                  - Added new version of MIWU driver
+- ModuleDrivers\pwm\6                   - Added new version of PWM driver
+- ModuleDrivers\nvic                    - Added new module driver for NVIC module
+- ModuleDrivers\scs                     - Added new module driver for SCS module
+- ModuleDrivers\syst                    - Added new module driver for SYST module
+- ModuleDrivers\sha                     - Added new module driver for SHA module
+- ModuleDrivers\gdma                    - Added new module driver for GDMA module
+- ModuleDrivers\pka                     - Added new module driver for PKA module
+- ModuleDrivers\swc                     - Added new module driver for SWC module
+- LogicalDrivers\bm                     - Added new module driver for BM module
+- LogicalDrivers\rsa                    - Added new module driver for RSA module
+
+v1.9.1
+-------
+- Chips\npce9mnx\*                      - Added/updated uRider11A modules/logical drivers
+                                        - Added/Updated uRider11A chip-specific registers/fields
+                                        - Added/Updated uRider11A muxing functions
+- ModuleDrivers\smb\*                   - Renamed SMB driver version 4 to version 6
+- ModuleDrivers\miwu\*                  - Updated MIWU register mapping (2 non-consecutive ports added)
+
+v1.9.0
+-------
+- ModuleDrivers\smb\*                   - Added new SMBus module with FIFO support
+                                        - SMBus API (smb_if.h) was modified
+- Chips\npce9mnx\*                      - Added chip "npce9mnx" (uRider11A) which support new SMB FIFO module
+
+v1.8.1
+-------
+- General                               - Modify all interrupt callback function pointer to use EXECUTE_FUNC
+                                        - Use INTERRUPT_SAVE_DISABLE/INTERRUPT_RESTORE for single interrupt
+                                          Disable/Enable safe operation
+- ModuleDrivers\fiu\*                   - Added new FIU API
+- LogicalDrivers\flash_spi\*            - Added new logical driver for read/write over Flash connected to FIU
+- ModuleDrivers\miwu\*                  - Removed MIWU_PORT_SUPPORT definitions across the code
+- ModuleDrivers\gpio\*                  - Removed GPIO_PORT_SUPPORT definitions across the code
+- ModuleDrivers\kbscan\*                - Cleaned dependency on MIWU_PORT_SUPPORT
+
+v1.8.0
+------
+- Chips\*                               - Added chip-dependent code per chip from SCFG module(s)
+                                        - Added abstraction for Chip dependent muxing for needed module drivers
+- Common\*                              - Separated hal_common into 4 different files:
+                                            - hal_common    - includes HAL common macros
+                                            - hal_internal  - includes HAL macros for internal use
+                                            - hal_external  - provides interface to include external file
+                                            - hal_dependencies - solves driver dependency definitions
+- Common\Interrupt                      - Added Interrupt abstraction macros to remove driver explicit dependencies
+                                          with ICU or MIWU
+- ModuleDrivers\*                       - Removed most inter-driver dependencies
+- ModuleDrivers\miwu\miwu_if.h          - Changed prototype of MIWU_HANDLER_T to receive MIWU_SRC_T as parameter
+- ModuleDrivers\gpio\gpio_if.h          - Removed OWNER parameter from GPIO_Init and other related functions
+- ModuleDrivers\itim8\2                 - Added new version of ITIM8 driver
+- ModuleDrivers\fiu\3                   - Added new version of FIU driver
+- ModuleDrivers\twd\2                   - Added new version of TWD driver
+- ModuleDrivers\hfcg\2                  - Added new version of HFCG driver
+- ModuleDrivers\gpio\2                  - Added new version of GPIO driver
+- ModuleDrivers\sti                     - Added new module driver for STI module
+- ModuleDrivers\shi                     - Added new module driver for Serial Host Interface (SHI) module
+- ModuleDrivers\otp                     - Added new module driver for One Time Programming (Nuvocell OTP) module
+- ModuleDrivers\lfcg                    - Added new module driver for LFCG module
+
+v1.7.0
+------
+- ModuleDrivers\smb                     - Support SMB wake-up Interrupt configuration in a dedicated
+                                          interface function
+                                        - Add new (optional) external definitions: SMB_SLAVE_ONLY/SMB_MASTER_ONLY -
+                                          Include only SMB Slave/Master-specific code in SMB driver,
+                                          respectively
+- ModuleDrivers\gpio                    - Add a new (optional) external definition: GPIO_PORT_SUPPORT -
+                                          Support Port-level GPIO operations, in addition to pin-level
+                                          operations
+- ModuleDrivers\miwu                    - Add a new (optional) external definition: MIWU_PORT_SUPPORT -
+                                          Support Port-level MIWU operations, in addition to input-level
+                                          operations
+- ModuleDrivers\pm_chan\2               - Add driver version 2 for 09A, with Shadow Data-In buffer capability
+- ModuleDrivers\kbscan                  - Rewrite driver
+- ModuleDrivers\ps2,cps                 - New PS/2 and CapSense module drivers support
+
+v1.6.2
+------
+- ModuleDrivers\dcu                     - Bug fix: A unhandled interrupt status was missed
+
+v1.6.1
+------
+- Chips\npcd378h                        - Sort MIWU_DEFINITION_TABLE according to MIWU source number
+
+v1.6.0
+------
+- Chips\npce69nx                        - Add new chip definition file
+- ModuleDrivers\miwu                    - Move MIWU Wake-Up Input Sources to chip definition file
+- ModuleDrivers\sio\sio_if.h            - Add registers field definitions
+
+v1.5.6
+------
+- hal.*                                 - Resolved deep overlap with EC_FDK integration
+- ModuleDrivers\pm_chan                 - Added new PM Channel driver
+
+v1.5.5
+------
+- Tools\                                - Added utility scripts for SWC HAL production
+- hal.h                                 - Fixed few bugs
+- hal.c                                 - Added "if defined" wrapper for each driver inclusion
+- ModuleDrivers\kbc_host                - renamed KBC_MODULE_TYPE to KBC_HOST_MODULE_TYPE
+- Docs\                                 - Created new Docs folder and added "Porting.txt" document
+
+v1.5.4
+------
+- ModuleDrivers\gpio                    - GPIO_NUM - New macro to Build a GPIO number given its Port and Bit number
+
+v1.5.3
+------
+- ModuleDrivers\*                       - Fix PC-Lint errors/warnings
+- ModuleDrivers\itim8                   - Bug fixes
+
+v1.5.2
+------
+- ModuleDrivers\smb                     - Fix SWC_HAL issue #11 - SMBus Stop condition after receiving a NACK
+                                        - Apply the same fixes for Bus Error (BER) condition
+
+v1.5.1
+------
+- ModuleDrivers\kbc_host                - Fix SWC_HAL issue #7 - Sending a byte over Keyboard and Mouse
+                                          Interface Host Access (SIB Core access) may lock Host Access forever
+
+v1.5.0
+------
+- ModuleDrivers\adc                     - Remove ADC_V_REF definition and usage
+                                        - Modify ADC_GetData() to return raw data w/o further processing
+                                        - Add new function: ADC_GetDataRange(), returning 2^^n,
+                                          where n is ADC_BIT_RESOLUTION
+- ModuleDrivers\icu                     - NMISTAT is defined as ROC, not RW1C
+- ModuleDrivers\hfcg                    - Change FLASH_FAST_READ to have a Boolean value (0 or 1),
+                                          move definition to i/f and export HFCG_ FLASH_FAST_READ
+                                        - Remove HFCG_FastReadSupported(). Instead, use FLASH_FAST_READ explicitly
+                                        - Bug fix: HFCG_FMCLK_HFCGML should be defined to FMCLK_HFCGML
+- ModuleDrivers\pmc,dac                 - New module drivers
+- ModuleDrivers\scfg                    - Add DAC muxing support
+- ModuleDrivers\miwu,twd                - Register PMC prerequisite functionality
+- ModuleDrivers\mswc                    - Added MSWC_VddIsOn function
+
+v1.4.7
+------
+- ModuleDrivers\*                       - Fix PC-Lint errors/warnings
+
+v1.4.6
+------
+- swc-hal.lnt                           - Add SWC_HAL PC-Lint Configuration file
+- Chips\npce79nx                        - Add ITIM8 module
+
+v1.4.5
+------
+- ModuleDrivers\icu                     - Changed ICU callback handling and activation
+                                          Now every ICU callback receives interrupt number it was called from
+                                          Also ICU callback doesn't need to be marked with #pragma any longer
+- ModuleDrivers\miwu                    - Updated MIWU driver initialization array to contain both source number
+                                          and interrupt number. Created single interrupt handler to handle all
+                                          MIWU interrupts
+- ModuleDrivers\*                       - Updated all interrupt handlers to reflect change in ICU driver
+- ModuleDrivers\*                       - Updated design of drivers that have multiple versions
+                                          Now the mechanism of interface maintenance for multiple driver versions
+                                          is also used for maintenance of driver code (with #ifdefs)
+
+v1.4.4
+------
+- ModuleDrivers\miwu                    - Fix SWC_HAL issue #4: A MIWU source is handled although disabled
+- ModuleDrivers\scfg\2\scfg_drv.c       - Implement GPIO muxing
+
+v1.4.3
+------
+- ModuleDrivers\cir                     - Enable Rx and LED when PWBTOUT is enabled, deselect alternate functions
+
+v1.4.2
+------
+- ModuleDrivers\dcu                     - Ensure all accesses to DCUCSR are atomic, since register is accessed both
+                                          from interrupts and main routines
+                                        - Bug fix: When clearing statuses, use the current DCUCSR value (as it
+                                          may change by the callback)
+- ModuleDrivers\scfg\3\scfg_drv.c       - Bug fix: when muxing a GPIO, gpio number should be treated as hexadecimal
+
+v1.4.1
+------
+- ModuleDrivers\scfg\3\scfg_drv.c       - SCFG_SMBBlock() - Blocks HMSMB interface I/Os
+- ModuleDrivers\itim8                   - Bug fix: Reset callback of initialized module only
+- ModuleDrivers\miwu\2\miwu_drv.c       - Support S3/S4/S5 sleep states indications
+- ModuleDrivers\smb                     - Bug fix: Send NACK before sending address when reading a single byte
+
+v1.4.0
+------
+- ModuleDrivers\sib                     - Ensure a read/write SIB transaction is atomic
+- ModuleDrivers\sio                     - Ensure a read/write SIO or LD transactions are atomic
+- ModuleDrivers\hfcg                    - Add functions for retrieving frequency information
+                                        - Support a delay function which is Timer HW-independent
+- ModuleDrivers\itim8,kbscan,spi        - New module drivers support
+- ModuleDrivers\pwm                     - Add support for source clock selection
+- ModuleDrivers\icu                     - Rename Unmask/Mask to Enable/Disable, respectively
+- ModuleDrivers\gpio,miwu               - Represent GPIO-num/MIWU-source in hexadecimal instead of decimal
+- hal.c                                 - Rename chip.c to hal.c
+- hal.h                                 - Export HAL API via hal.h file
+
+v1.3.3
+------
+- ModuleDrivers\peci                    - Ensure no PECI transaction is in progress prior to initiating a new transaction
+- LogicalDrivers\cir                    - Support CIR Match Select
+                                        - Enable RX pin muxing only upon request
+                                        - Support multiple wake keys
+                                        - Support wake after AC power cycle
+- ModuleDrivers\sib                     - lock device before accessing any SIB register
+
+v1.3.2
+------
+- General                               - Enable Compiling SWC_HAL as stand-alone drivers (rather than a 'chip.c' compilation)
+                                        - Clean all PC-Lint warnings
+
+v1.3.1
+------
+- ModuleDrivers\mft                     - Add new interface functions (currently required by the CIRLED logical driver)
+- ModuleDrivers\gpio, sio
+  LogicalDrivers\cir, cirled            - Fix compiler errors/warnings, generated when compiling SWC_HAL as stand-alone drivers
+
+v1.3.0
+------
+- ModuleDrivers\twd                     - Bug fix: Timer divider was set to a wrong value due to a wrong end condition
+- ModuleDrivers\mswc                    - Add MSWC module
+- ModuleDrivers\ewoc                    - Add EWOC module
+- LogicalDrivers\cir                    - Add CIR logical driver
+- LogicalDrivers\cirled                 - Add CIRLED logical driver
+- LogicalDrivers\tacho\tacho_if.h       - Fix include path to MFT interface (make absolute)
+- ModuleDrivers\miwu                    - MIWU_Config(), configuring all MIWU related aspects via a single routine
+- ModuleDrivers\gpio                    - Allow ownership control (Host/Core)
+- Chips\npcd378h                        - Support AMD ALERT MIWU event
+
+v1.2.2
+------
+- General                               - Port HAL to SWC_DEFS 1.5.1 (replacing redundant BIT_FIELD macros)
+                                        - Remove hal_error.h, replace HAL_STATUS with DEFS_STATUS
+
+v1.2.1
+------
+- ModuleDrivers\dcu                     - Divide DCU_Config into DCU_ConfigMeasurement (for duty-cycle measurements)
+                                          and DCU_ConfigAssert (for Input-Assertion indication)
+                                        - DCU_Force(): Handle duty-cycle values from 0 to 128 (maximum)
+                                          The driver determines whether to enable/disable the module (as in PWM)
+
+v1.2.0
+------
+- ModuleDrivers\sio                     - Add SuperI/O Configuration module
+- ModuleDrivers\kbc_host                - Add Keyboard Controller module
+- ModuleDrivers\pwm                     - Major interface update
+- ModuleDrivers\dcu                     - Handle a DCU status only if the appropriate interrupt enable bit is set
+- ModuleDrivers\smb                     - Export SMB_Recovery() to allow external bus recovery in case bus is stuck
+- ModuleDrivers\icu                     - Allow Trap routine installation (overrides the default trap routine)
+- ModuleDrivers\miwu                    - MIWU_HandleEvent(), handles a MIWU event based on its source
+- ModuleDrivers\twd                     - define CLOCK_FREQ as TWD_SRC_CLK that should be defined in chip.h
+                                          This enables different source clocks for TWD module
+                                        - Add TWD_TimerConfig_us() API for microsecond TWD
+                                        - Add TWD_WatchDogResetOccurred() for checking if Watch-Dog reset
+                                          occurred in the system
+                                        - Bug fix: define CLOCK_FREQ as 32768 Hz
+- LogicalDrivers\tacho                  - Support 2 TPPR fans (perform a 3-stage operation state-machine instead of 2)
+- Chips\npcd378h                        - Move HACC/FSGU to 378H project-specific files
+                                        - Reduce TACH_CLK to 100000
+                                        - Support THERMTRIP activity through MIWU
+
+v1.1.1
+------
+- Chips\chip.c                          - Define CHIP_C to support global variables declaration
+- Chips\npcd378h                        - Update MFT base address and number of GPIO ports
+- ModuleDrivers\miwu                    - Bug in MIWU_ConfigChannel: MIWU_ClearChannel should get a miwu_source enum
+- ModuleDrivers\pwm                     - Fix typo: PWM registers should use PWM_ACCESS
+- ModuleDrivers\peci                    - Bug fix: inverse fields definition
+- LogicalDrivers\tacho\2\tacho_drv.c    - Bug fix in TACHO_Init: Wrong prescaler calculation
+- ModuleDrivers\dcu\dcu_if.h            - Bug fix: Add DCU_WIN_512 to DCU_WINDOW_SIZE_T enum
+
+v1.1.0
+------
+- ModuleDrivers\dcu                     - Add DCU module
+- ModuleDrivers\mft\2\mft_drv.c         - Handle multiple MFTs per single interrupt handler
+- Chips\npce783x, npce79nx              - Add LFCG, ADC and SIB modules
+                                        - Add MIWU and SIB tables
+
+v1.0.0
+------
+Initial version

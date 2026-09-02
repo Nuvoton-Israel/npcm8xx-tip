@@ -1,0 +1,741 @@
+0.7.0 L0 0.5.9 L1
+================
+- Do UMA reads instead of direct.
+
+0.6.9 L0 0.5.8 L1
+================
+- Bug fix: if bootblock is at offset 2MB recovery image is not fully created.
+  Fix the size of image measurement with the additional gap.
+- Manifest root key is the last key in SKMT. Format is ECC DER.
+- Hardening: limit up to 100 lines. check return status of hardening.
+- In case of assert write to debug log.
+- Bug fix: in BMC reset, if the reloading fails BMC will go to recovery flow.
+
+0.6.8 L0 0.5.7 L1
+================
+- Optimize flash read. Include QUAD support code but currently disabled by default. 
+- Move TIP FW build version into a separate header file to avoid conflict with internal build versions.
+- Add missing header file include in the uart_if.h to avoid order dependency.
+- Support flash encryption (after code review).
+- Update TIP EID back to 0x0B.
+- Change version, delay for flush task and PRE_PRODUCTION.
+- Put all manifests at the end of flash.
+- Check stack overflow.
+- Support hardening.
+- Support BMC direct access.
+- Support bootblock at offset 512KB or 2MB.
+- Bug fix: touch WD during recovery delay.
+- Bug fix: ENC header field must be 0x03 to start encryption.
+- Support CFM.
+- WD0RCRB.BMCBUS should be zero.
+- Bug fix in handling SW and WD reset (avoid TIP reset).
+
+0.6.7 L0 0.5.6 L1
+================
+- Move manifests to the end of the flash.
+- format manifests when needed.
+- Enhance logging during malloc\stack failure.
+- Increase BMC_task stack.
+- Limit SKMT to 10 keys (final number TBD). 
+- Limit KMT to 4 keys (final number is TBD).
+
+0.6.6 L0 0.5.5 L1
+================
+- Support Hardening.
+- Fix Coverity issues.
+- Support BMC direct access commands: flash erase, program, read and FW update.
+  (note: FW udpate in direct mode has a known issue with encrypted images).
+- Direct mode: handle unknown interrupts - clean the correct notification.
+- Support OTP key revokation.
+- Init CDI to counter to allow devices in pre-production to boot to uboot.
+- PA-RoT: component attestation enablement
+    This PR includes all the features required for PA-RoT (component attestation).
+    1.  CFM workflow enablement
+    2.  PCD workflow enablement
+    3.  Configuration reset workflow enablement
+    4.  Attestation requester bring-up
+    5.  PCR/TCG log extension
+
+    Those features are under the control of compilation flags:
+                    **CMD_ENABLE_ISSUE_REQUEST
+                    CERBERUS_ENABLE_COMPONENT_ATTESTATION
+                    ATTESTATION_SUPPORT_SPDM
+                    ATTESTATION_SUPPORT_DEVICE_DISCOVERY
+                    CMD_ENABLE_RESET_CONFIG**
+    When disabling those flags, TIP acts as AC-RoT.
+
+0.6.5 L0 0.5.4 L1
+=================
+- MC reset, if needed, performed synchronously from TIP side while BMC is in reset.
+
+0.6.4 L0 0.5.3 L1
+=================
+- Added TIP FW Roll back protection, and copy for OTP to RAM3 for testability.
+- Fix DRAM window handling bug, in order to allow loading images to any address in DRAM.
+- Fix access for Z1 devices to NCL lib.
+- Move tip log to end of the recovery flash.
+- Support flash encryption. Need to create per die key and enable in each image header.
+- Fix TAG align issue.
+- Support A35 bootblock reset case.
+- Switch to lightweight X.509 and base64 API to remove mbedTLS from L0 completely.
+- Extend key scan option from TIP_ROM to all images.
+- Enhance NCL hash porting with SW SHA1 support.
+- TIP_SCR0 fix configuration during BMC reset.
+- Update OEM table.
+- Customize TIP DICE layer 0 to generate ECC-384 device ID key pair matching ROM.
+
+0.6.2 L0 0.5.1 L1
+=================
+- Fix trap issue in export found on DC_SCM only.
+- Optimize memory usage.
+- RSA and RNG code cleanup.
+
+0.6.1 L0 0.5.0 L1
+=================
+- Update RCR regs whenever PORST bit is set in TIP_SCR1 (ignore all other bits).
+- Export PCI parameters on any reset. Re-order the parameter locations.
+- Fix typos un uptime and similar.
+- SWRST4 is TIP_RESET.
+
+0.6.0 L0 0.4.9 L1
+=================
+- Fix DRAM window handling bug, in order to allow loading images to any address in DRAM.
+- In recovery mode: add an option to go to halt (print "N" at the start).
+- Merge PR #24: "Add the support for enforcing recovery image to match active at boot time".
+- Add support for ECC 384 + 521.
+- Add the support of ECC HW with tip_ecc_hw_ncl.c instead of old implementation using mbedtls code.
+- Wake all 4 cores when jump to DRAM (feature was limited to RAM2 only).
+- Disable QUAD in Cerberus core.
+- Add z1 security support.
+- Move tip log to end of the recovery flash.
+
+0.5.9 L0 0.4.8 L1
+=================
+- Fix serial_printf. Add get char.
+- Add support for ECC 384 + 521.
+- Add the support of ecc HW with tip_ecc_hw_ncl.c instead of old implementation using mbedtls code.
+- Add the support for enforcing recovery image to match active at boot time.
+- Add the support for certificate provision.
+- Remove unused Cerberus compilation flags to reduce binary size.
+- Remove unused "MBEDTLS_RSA_C" from tip_mbedtls_config.h.
+- Limit ECC_MAX_KEY_LENGTH to 384 in TIP and make corresponding change in tip_mbedtls_config.h
+  to config ECC curve type properly.
+- Add the support for updating TIP FW Combo 0 and Combo 1 together.
+  When the public key that is used to verify BMC combo is modified, SKMT and BMC Combo must be update together.
+  Previous FW update flow doesn't fit. This patch adds a third option (combo 2) that updates Combo 0 and Combo 1 together.
+- Added some minor documentation changes to crypto files
+- Revert the unexpected changes on "bmc_task.c" that were brought by PR13.
+- Port hardware crypto library NCL to TIP to replace mbedtls (except X-509).
+- Enlarge configTOTAL_HEAP_SIZE to 0xb000 to accommodate larger MCTP stack size to support "challenge"
+  command when NCL is ported.
+- Move all NCL typedef definitions in tip_security.h instead of .c.
+- Move to work on NCL_FIPS_MODE instead of NON_FIPS_MODE.
+- Added Z1: PKA_IntHandler, therefore returned to run the RSA selftest that was excluded.
+- Added code for A2.
+- Formatting: run .clang-format on files touched to enforce Cerberus coding guideline.
+
+0.5.8 L0 0.4.7 L1
+=================
+- Refactoring tip_image_firmware:
+  convert it to "tip_firmware_component" that derives from Cerberus "firmware_component" API
+  to describe each individual firmware component in TIP. Remove fields that are not neccessary
+  to save memory such as hash[64].
+- Refacotring tip_key_manifest:
+  Derive from Cerberus "key_manifest" API.
+  Add a firmware_component handler to indicate that KMT is also a firmware component. It makes parsing easier.
+  Remove unused fields and create abstract API for manifest base.
+- Refactoring tip_key_store:
+  Convert it to "tip_secondary_key_manifest" that derives from Cerberus "key_manifest" API.
+  Add a firmware_component handler to indicate that SKMT is also a firmware component. It makes parsing easier.
+  Removed unused fields and create abstract API for manifest base.
+- Refactoring tip_image_combo and its base API functions.
+- Refactoring TIP specific key lookup API- int tip_firmware_component_get_key().
+- Refactoring APIs within bmc firmware context.
+- Update L0 and L1 as a result of the data structure/API refactoring.
+- Enhancement for error logging:
+  Add a new header for boot logging error messages. Remove the error debug prints in L0 main flow.
+  Extend exsting L1 init logging enum to capture all the errors. Remove the error debug prints in L1 main flow.
+- Update in TIP firmware update task: switch to the new Cerberus API "firmware_update_run_update_no_revocation"
+  to align with existing workflow.
+- Source tree reorg: create "firmware" folder under "common".
+  Relocate all source/header files related to firmware into it.
+- CMake update as a result of source tree reorg.
+- Formatting: run .clang-format on files touched to enforce Cerberus coding guideline.
+
+0.5.7 L0 0.4.6 L1
+=================
+- Bug fix for bmc reset task not getting active flash handler properly.
+- TIP flash API enhancement.
+- Change naming convention for flash handlers (main flash/recovery flash/active flash)
+  to improve the code readability.
+- Bug fix for bmc reset task stack overflow (used by "reset" from Uboot to reload BMC images.)
+- Enable stack overflow detection logic under macro (_TIP_DEBUG_BUILD_).
+- Bug fix for configLIBRARY_LOWEST_INTERRUPT_PRIORITY in FreeRTOSConfig.h.
+- Formatting the files touched to follow Cerberus coding standard consistently.
+
+
+0.5.6 L0 0.4.5 L1
+=================
+- Re-organize the source tree based on "repo" approach.
+  - Split subfolder "project/nuvoton/tip" from older repo https://dev.azure.com/NuvotonCerberus/Arbel/_git/tip into a new repo.
+  - Source tree is built with "repo tool" via https://dev.azure.com/NuvotonCerberus/Arbel/_git/Cerberus-on-TIP-manifest.
+- Integrate latest Cerberus core https://dev.azure.com/NuvotonCerberus/Arbel/_git/Mirror-GitHub-Cerberus-Core into TIP.
+- Refactor virtual flash.
+- Firmware update flow enhancement.
+- Formatting L0 and L1: follow Project Cerberus coding standard consistently.
+  Add .clang-format that is used for auto formatting.
+
+
+0.5.5 L0 0.4.4 L1
+=================
+- flash: restructure the tip_master_flash and rename.
+- move all bmc handling functions to bmc_task.c
+- tip_mbx: reconfig the uart after BMC is up (singleton).
+- Code cleanup: rename and move tip_print_status. call it before NCL init.
+- recovery: warn the user and give them curtesy 10 seconds.
+- remove un used defines and cleanup start routines, hal_cfg.
+- Remove tip_unit_test.
+- CONTROL register: init to 0x04. Freefros will change this value later.
+- tip_rom_utils: remove unused defines. Left defines that will be used for code hardening phase.
+- tip_boot.h: code cleanup.
+- Remove _L0_ and _L1_.
+- Reuse NVIC table from ROM to save memory space.
+- move bmc_start function.
+- bug fix: flash: wrong init fiu and cs in xfer.
+- bug fix: flash: support single flash mode. tested on 4MB and 16MB.
+
+
+0.5.4 L0 0.4.3 L1
+=================
+- Merge branch 'tip-cleanup-xsun-2023' into tip-cleanup-tperry
+- NVIC bug fix for L0 (so far no interrupts in L0).
+- formatiing.
+- Remove un-needed initailizions of interrupts.
+- bmc_reset: if tip_bmc_firmware_init fails reset the TIP.
+- tip_bmc_firmware_init: reinitialized the SPI in case Linux changed settings of flash.
+- tip_update_reset_indication: move RCR settings to this function + bug fix handle only in PORST.
+- print reset type in bmc reset too.
+- in secondary reset clear RESSR and TIP_SCR1.
+- Update INTCR2 to show only last reset.
+
+
+0.5.3 L0 0.4.2 L1
+=================
+- FreeRTOS: in case of assert: print useful info.
+- NVIC_BMC_reset: clear NVIC int before reloading BMC.
+- in BMC reset and spurious interrupt reset: read the int number from the active and not the pending.
+- NVIC_IntHandlerCommon: bug fix: clear correct number.
+- Big fix: enable all traps in hardware_app_init.
+- Add task bmc_task to handle BMC reset reload.
+- Add _L0_ and _L1_ to differenciate in common folder.
+- Increase heap_size to 0xA000.
+- HOSTPER: set to 1 till KCS bug is fixed.
+
+
+0.5.2 L0 0.4.1 L1  (after code review)
+=================
+- Flash: check if FIU1 and FIU 0\CS1 are disabled by OTP bit.
+- Flash: bug fix: do not enable FIU1 CS2\3.
+- Flash: Allow using a 4MB flash for iamge.
+- start routine and ls file: use defined address instead of hard-coded numbers.
+- ld file: avoid declering heap location, let linker put it in bss.
+- start routine: more cleanup
+- merge origin/tip-fw-cleanup-xsun: FreeRTOS none-MPU version.
+- Spurius interrupt handling: in case of spurios interrupt print correct int number + NVIC state,
+  and then clear it.
+- OTP version: use two bits for each version number.
+- SWC_HAL B1: add related defintions (OTP changes).
+- B1: serial printf should use FUSTRAP2.TIP_UART_DIS to determine if prints are enabled.
+  This works on previous generations too.
+- Copy DBGRST too to INTCR2.
+- Debug log: bug fix: data currption in case of a 16MB flash.
+  Replace the code so that
+	 Debug log is 64KB (one flash block).
+	 its location is
+	  - split flash for active recovery:  64KB before recovery image.
+	  - two flash mode: last block in active flash.
+- UUID: add full data read (wafer, X\Y, year, work week). Note: debug chips do not contain this info.
+
+0.5.1 L0 0.4.0 L1
+=================
+- Set RCR regs only in PORST.
+- Change RCR values for TIP reset.
+- NVIC: print more data on spurious interrupts.
+- SPIX - set FIU_FIX to SINGLES. Other FIUs remain in INCREASING mode as before.
+
+0.5.0 L0 0.3.9 L1
+=================
+- manual merge origin/tip-fw-cleanup-xsun
+- replace UINT[8, 16, 32] with uint[8, 16, 32]_t everywhere.
+- tip_security: code cleanup done. Renamed some functions, return Cerberus status values.
+- tip_image_firmware: optimize code (tip_bmc_firmware_init, tip_firmware_get_next_img)+ cleanup.
+- tip_security: add missing function pointers to ROM.
+- cleanup start.s for L0.
+- Remove MPU full range setting from tip_cerberus
+- Clean CMakelist
+- SWC_HAL: GPIO: IRQ install fix (v. 40)
+- cleanup start files: remove _NS registers, init LR to TIP ROM start. init stacks fix.
+- remerge origin/tip-fw-cleanup-xsun (Dec. 7)
+   * rename files, add tip_utils.c\h
+   * cleanup tip_mbedtls_config.h
+   * remove tip_platform_io.h  (use platform_io.h instead.)
+   * remove platform_compiler.c\h
+   * remove duplication of platform.h
+   * move hardware_init and NVIC handlers to tip_init_common.c
+   * move tip_key_manifest_parse_and_copy to tip_key_manifest.c
+   * remove tip_freertos.c
+   * add platform\bare-metal folder
+- add dram get size.
+- bug fix key selection during recovery.
+- Add DME+RIOT data export to PCI MBOX.
+- Bug fix: after reset BMC does not restart. root cause:
+  bmc_continue() was not copied with NVIC_BMC_reset to another file.
+- Replace serial_printf_init from interrupt handler. Add serial_printf_reconfig fundction so that both BMC and TIP will
+  use PLL2 and not CLKREF.
+- Bug fix: clear CDI data once it's not needed.
+- Bug fix: don't save previous INTCR2 for reset indication.
+- Bug fix: align to the BMC UART settings.
+- Bug fix: update flow using wrong KMT.
+
+0.4.9 L0 0.3.8 L1
+=================
+- Enable FPU in start routine. Needed for Os optimization.
+- Manual merge stream tip_fw_cleanup_xsun.
+- Enable fPIC in L0 (needed for unit test).
+- Complete cleanup: tip_mbx, serial_printf, tip_keystore, tip_flash, tip_virtual_flash.
+- Retrieve bmc_continue fix to BMC reset handler.
+- tip_security cleanup: WIP.
+
+0.4.8 L0 0.3.7 L1
+=================
+- Bug fix, call bmc_continue in case of warm reset.
+- Set all RCR regs so that host is not reset during warm boot.
+  New settings:
+  WD0RCR = 0300ef9d
+  WD0RCRB = fffffc37
+  (same settings for all warm resets)
+
+- UART: get and print previous baud rate.
+- version during update bug fix.
+- code cleanup common folder (partial).
+- tip_image_firmware: add more checks for loading an image.
+
+0.4.7 L0 0.3.6 L1
+=================
+- manual merge origin/tip-L1-cleanup-xsun
+- tip_flash_set_active_flash: opimize code, fix print.
+- tip_memcpy: lock flash mutex while copy.
+- For tests: add option FORMAT_RECOVERY_FLASH.
+- tip_flash: code cleanup: replace typedef, switch to cerberus status enums, rename and split tip_flash_init_hal.
+
+0.4.6 L0 0.3.5 L1
+=================
+- Support all board types (flash connections detected at runtime.)
+
+
+0.4.5 L0 0.3.4 L1
+=================
+- EVB\DC_SCM both supported.
+
+0.4.4 L0 0.3.3 L1
+=================
+- Fix for openBMC reboot starting from recovery flash
+
+0.4.4 L0 0.3.2 L1
+=================
+3rd release for OCP DC-SCM demo
+- Fix for a trap caused by combo1 update during manifest revocation check.
+- Tune parameter "configTICK_RATE_HZ" in FreeRTOSConfig.h to boost cerberus cmd execution time
+- Use taskYield(platform_msleep(0)) in mbox receive packet path
+- Remove "tip_platform_config.h". "platform_config.h" is the right place to do MCTP and Crypto customization.
+- Debug prints cleanup
+
+0.4.4 L0 0.3.1 L1
+=================
+- Demo for OCP: match for DC-SCM flash layout.
+- allow BMC side image replacement.
+
+0.4.4 L0 0.3.0 L1
+=================
+- Demo for OCP: match for DC-SCM flash layout.
+
+0.4.4 L0 0.2.9 L1
+=================
+- Demo for OCP
+
+0.4.3 L0 0.2.8 L1
+=================
+- merge  origin/tip-L1-cleanup-xsun
+- Bug fix: dummy cycles setting reused for next direct read. Split values handling.
+- test_flash: add more test modes.
+- run BL31 only after update flow is complete.
+- use get_uuid in tip_boot.
+- Disable interrupts while booting BMC. Required to gfix issue with NVIC_BMC_reset and debugger re-load.
+- serial_print_init: always configure uart clocks.
+- clear TIP_CTL_STS_DBGRST_STS on init.
+- bug fix: tip_component_start: if pass do not release struct tip_firmware_image (only in case of fail).
+- FreeRTOS: add vTaskInit to make sure all globals of RTOS are initialzed properly.
+- Enable RTOS interrupts (CPSIE if) before RTOS starts to run.
+- Start routine, jump to main with BLX to clear T bit.
+
+
+0.4.2 L0 0.2.7 L1
+=================
+- Add CLK_Delay_Sec.
+- tip_cmd_device: read UUID from DIE\LOCATION\WAFER field in OTP.
+- read OID from PDID register.
+- Add timestamp to header + check during combo parse for update only.
+- tip-mbx: add timeout.
+- check null pointer in various location.
+- Check return status for tip_get_key.
+
+0.4.1 L0 0.2.6 L1
+=================
+- tip_flash_get_index_of_currently_running_image: bug fix,
+  image can't physically be on the last 512KB, so no need .
+to check.
+- tip_flash:
+  * bug fix {fiu, cs}-> ind fix calc.
+  * Set address mode to 4B fix: Remove double call to FIU_Config4ByteAddress.
+  * tip_flash: no QUAD mode for now (will be enabled after code stabilize).
+
+- FIU driver: FIU_UMA_ioctl don't use UMA address size for direct read.
+- SWC_HAL FIU driver: extend FIU_UMA_ioctl to support operations larger then 16 bytes.
+- SWC_HAL: SPI0 CS1 : need to set IO slew rate to fast.
+- due to last note: remove loop on FIU_UMA_ioctl in tip_flash_xfer.
+- Core reset bug fix: CORSTC: set to 1s. Except MC.
+- tip_bmc_firmware_init: check return status. do not continue if BMC fail to boot.
+- tip_memcpy: set active flash before read.
+- RESSR: copy values from TIP_SCR1 to INTCR2. Print last reset type.
+- OEM: read 2 bytes from OTP (was 1).
+
+- Cerberus core bug fixes:
+  * Support old flash with SFDP gen 1.0: to check addres mode use capacity as indicator.
+  * Winbond flashes don't support 4B commands (read, program and erase in 4B mode use the same instruction set).
+  * avoid calling spi_flash_sfdp_get_quad_enable if flash controoller doesn't support QUAD mode.
+- Add test_flash to unit tests.
+- image version bug fix: support version use from tip_firmware_image_init, before Verify.
+
+0.4.0 L0 0.2.5 L1
+=================
+- Add NVIC handler for BMC reset (reload BMC only)
+- A35_INIT earlier.
+- Add version check, compare each version number against otp version number.
+- Point image_header.data to the version number on the header.
+- Note: OTP version increment is not yet supported.
+
+0.3.9 L0 0.2.4 L1
+=================
+- virtual flash bug fix: use memcy instead of tip_memcpy.
+- shared attestation hash is 512.
+- tip_mbx bug fixes.
+- tip_combo: return early if failed to find image.
+- Add tip_flash_fwpart_init
+- remove fiu and cs from functions that get a pointer to struct flash_master.
+- Init flash, crypto, skmt and bmc in cerberus_init, instead of in main.
+- init WD0RCR, 2, 3 before BMC starts.
+- tip_cerberus: bug fix NVIC_EnableInt should be with trap offset.
+- check load and verify return status. if verify tip images fail in secure boot, restart.
+- Revert all FIU driver changes, except ioctl.
+- Update SWC_HAL to version 3.6.2.1
+- Remove RNG driver. Using TIP_ROM instead. remove redundant call to RNG_Init.
+
+0.3.8 L0 0.2.2 L1
+=================
+- L0: if L1 or SKMT fail to verify: reset and search fir next valid image.
+- SEC_EccAuth_ECC: bug fix stack overflow.
+
+0.3.7 L0 0.2.2 L1
+=================
+- Add IF tip_combo_image.
+- Add IF tip_cmd_device.
+- tip_key_manifest, tip_key_store_skmt and tip_image_firmware: extract tip_get_key so that all can share same verify.
+- reduce heap to 0x9000 (we don't need that much. all new feature avoid using malloc.
+- All images can now be handled from virtual flash (needed for update flow).
+- tip_kmt: add valid flag to indicate when KMt is erased.
+- Update DME_DICE struct to match A1.
+- improve prints in many functions.
+- Unit tests: add test_tip_cmd_device, test_DME_DICE_dump, test_combo.
+- Program OTP: DME and DICE request.
+- Clear CDI bug fix: CDI is 64 bytes (clear was 32 bytes)
+- Clean up all the PHASE1,2,3 from tip_boot.c
+
+0.3.6 L0 0.2.1 L1
+=================
+- tip_flash_image: take tip_flash_get_handler outside of scope, to allow using both virtual flash
+  and real flash.
+- tip_keystore: same as above.
+- tip_bmc_firmware_init: same as above.
+- tip_flash: check parameters validity.
+- tip_virtual_flash and master_flash_tip are aligned to have a common area, so that tip_image_firmware can acesss
+  for base addres, size, and base objects.
+- tip_cerberus: init only CS 0, 1 of each FIU.
+- tip_boot: load_main_application remove redundant parameter.
+- unit tests: add a test to boot from virtual flash.
+
+0.3.5 L0 0.2.0 L1
+=================
+- Define virtual flash location and address + init.
+- Remove FLASH_IDX_STAGING. Using virtual flash only for staging. Read only.
+- All images are up to 16MB (can be increased later if needed).
+
+0.3.4 L0 0.1.9 L1
+=================
+- Get RSA key from SKMT, which is signing the manifests.
+- Use fixed key from header for ECC verify, instead of key scan.
+- Keep SHA512 inside tip_firmware_image. Later can copy if to attestation shared object (if it needs sha512)
+
+0.3.3 L0 0.1.8 L1
+=================
+- Add SKMT. works with IGPS 3.5.0 and above only.
+- tip_firmware_image_verify_func: use SKMT\KMT according to image type. Optimize to do sha only once for image.
+- add TIP_copy_hash_from_tip_log
+
+0.3.2 L0 0.1.7 L1
+=================
+- relocate KMT on tip_log (of TIP ROM).
+- L1: increase heap size to 40KB.
+- Disable WD0 (enabled by TIP_ROM).
+- replace secure_heap with heap_4.
+- removed -flto flag. heap_4 doesn't like it.
+- Update SWC_HAL version
+
+0.3.1 L0 0.1.6 L1
+=================
+- fiu_uma bug fix : do not change FIU_DRD_CFG
+- merge riot_copy fix.
+- mbedTLS use same heap as Freertos.
+- use only 2 keys from KMT. Heap can increase on top of it (+2KB)
+- manifests move to 8MB offset.
+- Add cmd_device_empty.
+
+0.2.9 L0 0.1.5 L1
+=================
+- fix trap on context switch: remove MPU enable during context switch.
+- trap handler: print more info.
+- MPU region: define one region of 4GB.
+- start A35 only after cerberus_init has finished.
+- rename sections in ld files for clarity.
+- Moved A35_INIT and added PHASE3_DEBUG_LOG. Both are at boot.h
+
+
+0.2.9 L0 0.1.4 L1:
+==================
+- tip_flash: check for overflow.
+- rot_memory_map: change manifests to not override uboot.
+- FreeRTOS: disable recursive mutex, use newlib. allow idle task.
+- FreeRTOS: while(1) in case of ASSERT.
+- Increase heap to 0x8000.
+- move L1 to 0x20100.
+- tip_cerberus:copy_riot_key - if no keys found return DEADBEEF instead of NULL (still needs a fix!)
+- tip_cerbrus: enable all participating flashes.
+- Fix RNG init and solve SHA and DRBG self-test
+- Check KMT anchor to verfy it was not overriden
+
+
+0.2.8 L0   0.1.3  L1:        (May 3rd 2022)
+====================
+- Merge PCR code from branch L0_reloc_dev_xsun.
+- Verify KMT reads keys from legal address only.
+- Add KMT place holder in L1 ld file.
+
+0.2.7 L0   0.1.2  L1:        (May 1st 2022)
+====================
+- Bug fix: clear init heap are in start routine of L0 removed.
+- Change: L0 copy is at 0xA0100. skpi the jump in case we are already executing the copy (for easy debug).
+- Dice: read CDI from TIP_RAM shared area (dme_dice_table)
+- Rename firmware_image_* to tip_firmware_image_*
+- Merge branch L0_reloc_dev_xsun
+- Enable PHASE2_DICE.
+- mbedTLS: enable MBEDTLS_ECP_DP_SECP256R1_ENABLED (needed for dice).
+
+0.2.6 L0   0.1.1  L1:        (April 28th 2022)
+====================
+- L0 loads itself to RAM2 (via TIP window) and execute from there.
+- L1 clears RAM2 in start routine.
+
+
+0.2.5 L0   0.1.0  L1:        (April 26th 2022)
+====================
+- Add tip_kmt_manifest IF. Used in initialize_running_image_interface  L1
+- Code size reduction.
+- move L0 RAM to RAM2.
+- Use MANIFEST_KEY_ADDRESS define.
+- Init Cortex-M4 FP unit.
+- L0 start routine extended to clear bss and stack (now on RAM2).
+- Enable 	-fdata-sections -ffunction-sections . L1 stay in -O1 for now , due to failures in RNG init.
+- Add firmware_image_get_key_manifest_func
+
+
+0.2.4 L0   0.0.9  L1:        (April 14th 2022)
+====================
+- crypto init : more before FreeRTOS init.
+- remove reload of L1.
+- move A35 init code to tip_bmc_firmware_init. is will call tip_component_start for each component.
+  note: still need to change the struct..
+- reset is done only in PRODUCTION_CODE macro. for Development no reset for now.
+- read version number from OTP.
+- virtual driver added.
+
+0.2.3 L0   0.0.8  L1:        (April 10th 2022)
+====================
+- Use DRBG on ROM. Fix RNG_PRESCALER_CLOCK value.
+- Fix TIP reset settings of A1. Add SW reset function (platform_reset)
+- Add mbedtls_hardware_poll to connect to TIP DRBG.
+- Improve NVIC_TrapHandlerCommon logging and handling.
+- L1: Move ram_header to 0x30000 !!!!
+- Fix LD issue (ordered \ on ordered)
+- SCS_Init: fix issue of ICSR pending values. Print more values is SCS print regs.
+- Merge branch cerberus-on-tip-dev with mailbox fix. wothput crypto w.o. (not needed since added mbedtls_hardware_poll
+instead).
+
+
+
+0.2.2 L0   0.0.7  L1:        (March 31th 2022)
+====================
+- Remove NCL, use ROM based NCL lib. Both A1 and Z1 detected at run time.
+- Move KMT to be 4KB aligend.
+- Boot from secondary flash: TIP_FW will always boot from same flash TIP_ROM booted L0 from.
+  call tip_flash_set_active_flash to select te used flash.
+  load_main_application: not related to recovery_boot anymore.
+  loading will always be on same flash used for boot.
+- tip_cmd_channel_init: add parameter for size and location.
+- tip_flash: fix issues with transition to small\large flash.
+- If L0 fails to load: do SW reset to allow loading recovery image instead.
+  L1 has same code under PRODUCTION_CODE (for now it's disabled for easy debug of L1).
+- Bug fix: SWRSTC2, SWRSTC3 were not set properly (should be same as SWRSTC1).
+- Init cmd_channel in L1.
+
+0.2.1 L0   0.0.6  L1:        (March 9th 2022)
+====================
+- Add authentication check (Verify) for all FW components.
+  For the next few releases failing authentication doeesn't block image loading.
+  In later versions this will change (dependent on macro:  PHASE_DEVELOPER)
+- Add NCL to compilation. NCL over Cerbrus engines are yet to come.
+  However, this code is added to repo but not used for now.
+- Detect A1\Z1 and print type. All code is compatible for both devices.
+- Works with IGPS 3.4.3 and above.
+
+0.2.0 L0    0.0.5 L1:       (Feb. 23 2021)
+=====================
+- Support flashes < 16MB.
+- Support mix of different types of flashes on the same FIU.
+
+
+0.1.9 L0    0.0.4 L1:        (Feb. 22 2021)
+=====================
+- Unlock OTP. A35 can wr\rd.
+
+
+0.1.8 L0    0.0.3 L1:
+=====================
+- Add tip_mbx (untested).
+- Activate BL31 on A35 (if exist).
+- Works only with Bootblock 0.1.8
+- Clear all scratchpads before starting A35.
+- BL31: loaded w\o header.
+- Delete most of bootblock before jumping to BL31.
+  (BL31 use this area as stack.).
+- L0: tip_boot: remove dead code (related to A35).
+
+
+0.1.7 L0    0.0.2 L1:
+=====================
+- Flash index configurable from boot.h.
+- Support NVIC.
+- Align FREERTOS to version: v10.4.3.
+- Increase heap , split stack to MSP and PSP stacks. move FreeRTOS heap to heap area.
+- L1 boots from 0x40200 (require update in IGPS).
+- Add verbose trap handler.
+- To disable A35 uncomment: A35_INIT.
+- Bug fix: check return status from loading A35 images.
+- Start routine: clear all memory (bss, heap, stack) init all regs. clear traps. disable MPU.
+- NVIC driver: bug fix: create vecotr talbe according to number of interrupts.
+- SCS driver: add SCS_Init to clear all regs.
+
+0.1.6: L0   0.0.1: L1
+=====================
+- Split L0 and L1.
+- Start work on FreeRTOS. compiling but not active yet.
+- Remove FLASH_DEV and FLASH drivers from SWC_HAL.
+- Bug fixes in tip_flash.
+- Add and use tip_image_firmware.
+- Load BL31 and OpTee, but not use yet. Make A35 jump directly to uboot for now.
+
+0.1.5
+======
+- Added WiWynn.
+- Fixed bug in print key validity.
+- Load BL31 and OpTee code from flash (no authentication for now).
+- change tag.
+- Work only with IGPS 3.3.3
+- add TEST_OTP_READ
+
+0.1.4
+=====
+- Remove PALLADIUM define.
+- RNG add RNG_ROCTL regs (for print)
+- FUSE: fix FUSE_PrintModuleRegs
+- CLK: add CLK_GetUpTimeMiliseconds
+- New unit tests: SPI-X blink, random delay, WD. Not enabled by defualt.
+- FIU: remove FIU_UMA_ioctl SW_CS handling. will use UMA assertion.
+- main: print KMT keys and uptime.
+
+0.1.3
+=====
+- cerbrus\flash IF: bug fixes + add dual\qual mode 3\4 bytes mode.
+- FIU driver: add FIU_UMA_ioctl command.
+- Bug fix pragma pack settings for mailbox.
+
+0.1.2
+=====
+- Set AHBCKFI => 0xFA
+- UART init: use UART7 or UART0, but skip muxing settings.
+- SPI-X: write to address 0 data 0xAA
+- binary: align to 64 bytes.
+- Change SMP base address to 0xF0800E00 and 4 (64 bit address).
+
+0.1.1
+=====
+- Set AHBCKFI => 0xFA
+
+0.1.0
+=====
+- First release to MS.
+
+0.0.9 debug version : Program OTP
+=====
+- Program otp keys
+
+0.0.8
+=====
+- Flash\Cerberus support: read_id and SFDP tested.
+- Fix FIU driver UMA ops.
+- Add testing only malloc version.
+
+0.0.7
+=====
+- Fix SPI-X muxing.
+- Print chip serial number.
+
+0.0.6
+====
+- Print OEM number, OTP status and boot type.
+- lock jtag state.
+- set FCFG for BMC side (read only)
+- Cerberus\FLASH_DEV IF support.
+
+0.0.3:
+======
+- Set TIPCFGR.
+- If uboot not found, halt after bootblock.
+-SWRSTC1
+
+0.0.2:
+======
+- Scan for bootblock and uboot images.
+- Set TIPCFGR.
+
+0.0.1
+=====
+- First release, for bringup.

@@ -1,0 +1,2546 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Nuvoton Technology Corporation. All rights reserved.
+// Licensed under the MIT license.
+
+#include <stdint.h>
+#include <string.h>
+#include <stdbool.h>
+#include "asn1/ecc_der_util.h"
+#include "asn1/x509_mbedtls.h"
+#include "asn1/x509_thread_safe.h"
+#include "attestation/attestation_logging.h"
+#include "attestation/attestation_requester.h"
+#include "cmd_interface/cmd_background_handler.h"
+#include "cmd_interface/session_manager_ecc.h"
+#include "common/authorization_allowed.h"
+#include "common/authorization_challenge.h"
+#include "crypto/ecc_ecc_hw.h"
+#include "crypto/ecc_thread_safe.h"
+#include "crypto/hash_mbedtls.h"
+#include "crypto/hash_thread_safe.h"
+#include "crypto/rng_mbedtls.h"
+#include "crypto/rng_thread_safe.h"
+#include "crypto/rsa_mbedtls.h"
+#include "crypto/rsa_thread_safe.h"
+#include "crypto/signature_verification_ecc.h"
+#include "deprecated/attestation_requester_task.h"
+#include "deprecated/flush_data_background.h"
+#include "deprecated/mctp_cmd_task.h"
+#include "flash/flash_store_contiguous_blocks.h"
+#include "keystore/keystore_flash.h"
+#include "logging/debug_log.h"
+#include "logging/logging_flash.h"
+#include "manifest/manifest_verification.h"
+#include "manifest/cfm/cfm_manager_flash.h"
+#include "manifest/cfm/cfm_observer_pcr.h"
+#include "manifest/cfm/manifest_cmd_handler_cfm.h"
+#include "manifest/pcd/manifest_cmd_handler_pcd.h"
+#include "manifest/pcd/pcd_manager_flash.h"
+#include "manifest/pcd/pcd_observer_pcr.h"
+#include "mctp/cmd_interface_mctp_control.h"
+#include "mctp/msft_nuvoton_base_mctp_protocol.h"
+#include "riot/riot_key_manager.h"
+#include "serial_printf/serial_printf.h"
+#include "spdm/cmd_interface_spdm.h"
+#include "status/rot_status.h"
+#include "system/system_state_manager.h"
+#include "bmc_task.h"
+#include "build_version.h"
+#include "cerberus_pcr.h"
+#include "cmd_interface_tip.h"
+#include "event_task_freertos.h"
+#include "init_logging.h"
+#include "pcr_tcg.h"
+#include "platform_api.h"
+#include "platform_io.h"
+#include "rot_memory_map.h"
+#include "tip_aes_ncl.h"
+#include "tip_app_context.h"
+#include "tip_boot.h"
+#include "tip_cmd_device.h"
+#include "tip_device_id.h"
+#include "tip_ecc_hw_ncl.h"
+#include "tip_firmware_component.h"
+#include "tip_flash.h"
+#include "tip_fw_update_task.h"
+#include "tip_hash_ncl.h"
+#include "tip_image_combo.h"
+#include "tip_key_manifest.h"
+#include "tip_log.h"
+#include "tip_mbx.h"
+#include "tip_rng_ncl.h"
+#include "tip_rom_utils.h"
+#include "tip_security.h"
+#include "tip_skmt.h"
+#include "tip_utils.h"
+#include "tip_version.h"
+#include "tip_virtual_flash.h"
+#include "twd_task.h"
+#include "tip_reset.h"
+
+
+/* TIP is configured as PA-RoT by default. */
+#define DEFAULT_IS_PA_ROT							true
+
+/* Maximum duration to wait for MCTP bridge to assign Cerberus an EID before attempting to get
+ * routing table */
+#define CERBERUS_GET_ROUTING_TABLE_TIMEOUT_MS		20000
+
+/* Default attestation cadences */
+#define CERBERUS_UNAUTHENTICATED_CADENCE_MS			30000
+#define CERBERUS_AUTHENTICATED_CADENCE_MS			3600000
+#define CERBERUS_UNIDENTIFIED_TIMEOUT_CADENCE_MS	30000
+
+/* SPDM ResponseNotReady defaults */
+#define CERBERUS_RSP_NOT_READY_MAX_TIMEOUT_MS		3000
+#define CERBERUS_RSP_NOT_READY_MAX_RETRY			3
+
+/* Default timeout adjustment for MCTP bridge communication */
+#define CERBERUS_MCTP_BRIGE_ADDITIONAL_TIMEOUT_MS	5000
+
+/* MCTP control protocol default timeout */
+#define CERBERUS_MCTP_CTRL_PROTOCOL_TIMEOUT_MS		1000
+
+/* stuff from TIP_ROM */
+extern TIP_LOG_Arr_T TIP_LOG_Arr __attribute__ ((section (".log")));
+
+/**
+ * Version of Cerberus FW. This must be incremented with every change to the
+ * bootloader.
+ */
+static const char *version_L1 = CERBERUS_FW_VERSION_STRING;
+
+/**
+ * Version string for the Cerberus FW.
+ */
+static char version[CERBERUS_PROTOCOL_FW_VERSION_LEN];
+
+/**
+ * Version string for RIoT core.
+ */
+static char riot_core_version[CERBERUS_PROTOCOL_FW_VERSION_LEN];
+
+/**
+ * List of FW version strings.
+ */
+static const char *fw_version_list[2];
+
+/**
+ * Container for FW version data.
+ */
+static struct cmd_interface_fw_version firmware_version;
+
+/**
+ * SVN version handler.
+ */
+struct tip_version_handler *tip_version =
+	(struct tip_version_handler*) TIP_VERSION_SHARED_ADDRESS;
+
+/**
+ * Handler for the main flash.
+ */
+struct spi_flash *main_flash;
+
+/**
+ * Handler for the recovery flash.
+ */
+struct spi_flash *recovery_flash;
+
+/**
+ * Handler for the active flash.
+ *
+ * Active flash is where the running fw image is loaded from.
+ * It can be either main flash or recovery flash.
+ */
+struct spi_flash *active_flash;
+
+/**
+ * Flag indicating the system booted from the recovery flash.
+ */
+bool recovery_boot;
+
+/**
+ * Offset of recovery image location.
+ */
+uint32_t recovery_flash_start_offset;
+
+
+/**
+ * Source of the most recent chip reset.
+ */
+static uint16_t reset_source;
+
+/**
+ * Hash engine that will be shared between multiple components.
+ */
+struct tip_hash_ncl_engine system_hash;
+
+/**
+ * Wrapper for the shared hash engine.
+ */
+struct hash_engine_thread_safe shared_hash;
+
+/**
+ * HW Engine for ECC operations.
+ */
+static struct tip_ecc_hw_ncl_engine hw_ecc;
+
+#if defined CERBERUS_ENABLE_COMPONENT_ATTESTATION && defined ATTESTATION_SUPPORT_RSA_CHALLENGE
+/**
+ * RSA engine that will be shared between multiple components.
+ */
+static struct rsa_engine_mbedtls system_rsa;
+
+/**
+ * Wrapper for the shared RSA engine.
+ */
+static struct rsa_engine_thread_safe shared_rsa;
+#endif
+
+/**
+ * ECC engine that will be shared between multiple components.
+ */
+static struct ecc_engine_ecc_hw system_ecc;
+
+/**
+ * Wrapper for the shared ECC engine.
+ */
+static struct ecc_engine_thread_safe shared_ecc;
+
+/**
+ * X.509 engine that will be shared between multiple components.
+ */
+static struct x509_engine_mbedtls system_x509;
+
+/**
+ * Wrapper for the shared X.509 engine.
+ */
+static struct x509_engine_thread_safe shared_x509;
+
+/**
+ * Hardware RNG that will be shared between multiple components.
+ */
+static struct tip_rng_ncl_engine system_rng;
+
+/**
+ * Wrapper for the shared RNG engine.
+ */
+static struct rng_engine_thread_safe shared_rng;
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+/**
+ * Software hash engine for attestation requester transcript hashing.
+ */
+static struct hash_engine_mbedtls attestation_hash_sw;
+#endif
+
+/**
+ * The interface to use when updating a firmware image combo.
+ */
+static struct tip_image_combo updating_img[NUM_TIP_FW_UPDATER];
+
+/**
+ * State management for the running image.
+ */
+static struct tip_app_context running_state;
+
+/**
+ * Variable context for the Cerberus firmware updater.
+ */
+static struct firmware_update_state fw_updater_context[NUM_TIP_FW_UPDATER];
+
+/**
+ * The module for updating Cerberus firmware.
+ */
+static struct firmware_update fw_updater[NUM_TIP_FW_UPDATER];
+
+/**
+ * The task for executing tip wd periodic
+ */
+static TaskHandle_t tip_wd_task;
+
+/**
+ * The task for executing Cerberus firmware update actions.
+ */
+struct tip_fw_update_task cerberus_update;
+
+/**
+ * tip system manager
+ */
+static struct system tip_system;
+
+/**
+ * The I2C interface(mailbox) to the BMC.
+ */
+struct tip_cmd_channel system_i2c;
+
+/**
+ * The system command interface processing task
+ */
+static struct mctp_cmd_task system_cmd_task;
+
+/**
+ * Variable context for the background command handler.
+ */
+static struct cmd_background_handler_state background_handler_context;
+
+/**
+ * Handler for processing commands in the background.
+ */
+static struct cmd_background_handler background_handler;
+
+/**
+ * List of handlers for the background command task.
+ */
+static const struct event_task_handler *background_handlers[1] = { &background_handler.base_event };
+
+/**
+ * Varible context for the background command processing task.
+ */
+static struct event_task_freertos_state cmd_background_context;
+
+/**
+ * Task for processing commands in the background.
+ */
+static struct event_task_freertos cmd_background_task;
+
+/**
+ * Task for handling bmc reset.
+ */
+struct bmc_task bmc_reset_task;
+
+/**
+ * The command handler for device operations.
+ */
+static struct tip_cmd_device tip_cmd_device;
+
+/**
+ * The BMC MCTP interface context
+ */
+static struct mctp_interface system_interface;
+
+/**
+ * The system command interface
+ */
+static struct cmd_interface_tip system_cmd_interface;
+
+#if defined ATTESTATION_SUPPORT_SPDM && defined CERBERUS_ENABLE_COMPONENT_ATTESTATION
+/**
+ * The SPDM command interface
+ */
+static struct cmd_interface_spdm spdm_cmd_interface;
+#endif
+
+/**
+ * The MCTP control command interface
+ */
+static struct cmd_interface_mctp_control mctp_control_cmd_interface;
+
+/**
+ * The system command interface processing task.
+ */
+static struct mctp_cmd_task system_cmd_task;
+
+/**
+ * The system attestation responder instance
+ */
+static struct attestation_responder system_attestation_responder;
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+/**
+ * The system attestation requester state instance
+ */
+static struct attestation_requester_state attestation_state;
+
+/**
+ * The system attestation requester instance
+ */
+struct attestation_requester system_attestation_requester;
+
+/**
+ * Task for performing component attestation.
+ */
+static struct attestation_requester_task attestation_requester_task;
+
+/**
+ * Timer for delaying routing table sync request to BMC.
+ */
+platform_timer routing_table_rq_timer;
+#endif
+
+/**
+ * Variable context for the flash storage of keystore.
+ */
+static struct flash_store_contiguous_blocks_state keystore_flash_context;
+
+/**
+ * Flash block storage for keys.
+ */
+static struct flash_store_contiguous_blocks keystore_flash;
+
+/**
+ * Storage for keys and certificates.
+ */
+static struct keystore_flash main_keystore;
+
+/**
+ * End of tip own flash region (manifests, key store, system data).
+ * TIP flash own region starts at (manifest_end_flash_addr - 0xC0000)
+ * till manifest_end_flash_addr.
+ */
+static uint32_t manifest_end_flash_addr;
+
+/**
+ * Secondary Key manifest image component.
+ */
+static struct tip_firmware_component skmt_img;
+
+/**
+ * TIP secondary Key manifest.
+ */
+struct tip_secondary_key_manifest tip_skmt;
+
+/**
+ * Variable context for the debug log.
+ */
+static struct logging_flash_state debug_log_context;
+
+/**
+ * Flash logger for storing the debug log.
+ */
+static struct logging_flash debug_logger;
+
+/**
+ * Application manager for RIoT keys and certificates.
+ */
+static struct riot_key_manager riot;
+
+/**
+ * Device manager.
+ */
+static struct device_manager device_manager;
+
+/**
+ *  Platform and host PCR storage.
+ */
+static struct pcr_store pcr_storage;
+
+#ifdef CMD_SUPPORT_ENCRYPTED_SESSIONS
+/**
+ * AES engine for session management.
+ */
+static struct tip_aes_ncl_engine session_aes;
+
+#define CERBERUS_MAX_SESSIONS 3
+
+/**
+ * Table for session management.
+ */
+struct session_manager_entry session_entries[CERBERUS_MAX_SESSIONS];
+#endif
+
+/**
+ * Session manager instance.
+ */
+static struct session_manager_ecc session;
+
+/*******************************************************
+ * CFM, PCD related structures
+ *******************************************************/
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+/**
+ * Default ECC key to use for manifest verification.
+ *
+ * TODO: Update the manifest key to the one that's signed by manifest root key.
+ */
+static struct manifest_verification_key_ecc manifest_ecc_key = {
+	.id = 2,
+	.key = {
+		0x30,0x76,0x30,0x10,0x06,0x07,0x2a,0x86,0x48,0xce,0x3d,0x02,0x01,0x06,0x05,0x2b,
+		0x81,0x04,0x00,0x22,0x03,0x62,0x00,0x04,0x07,0x45,0x01,0x6e,0xb4,0xde,0x25,0x13,
+		0x77,0x97,0x4c,0x5c,0xef,0x73,0x86,0x66,0xa4,0x39,0xfa,0x28,0x01,0xe7,0x65,0xf7,
+		0x4d,0xbe,0x45,0x9c,0x1f,0x10,0x2f,0x7f,0xdd,0x79,0xde,0x52,0x60,0x20,0x6b,0x7e,
+		0x65,0x78,0xda,0xdd,0xfe,0xe5,0xab,0x22,0xed,0x28,0xdc,0xaa,0x4b,0xf3,0x11,0x08,
+		0x54,0xc2,0x7a,0xef,0x6b,0x32,0xfb,0x35,0x42,0x5e,0x1b,0xad,0xb0,0x4a,0x40,0x9e,
+		0x5a,0x0d,0x15,0x3d,0x60,0xbe,0x5f,0xea,0xd8,0xdb,0xf6,0x42,0x8e,0x53,0x75,0xac,
+		0x75,0x39,0x8b,0x20,0xf6,0x9d,0x02,0x1b
+	},
+	.signature = {
+		0x30,0x66,0x02,0x31,0x00,0xe5,0xb5,0xf9,0x9e,0x4d,0x7e,0x84,0xa1,0x33,0xe2,0xc8,
+		0x9b,0x43,0xfd,0x6f,0x8f,0x0a,0xcd,0xe2,0xe1,0xa6,0x36,0xa3,0xd2,0xba,0xd8,0xf0,
+		0x1b,0x88,0xaf,0x50,0xed,0x7b,0x9d,0xdd,0xc8,0xd9,0x68,0x88,0x20,0x46,0x15,0xf5,
+		0x4c,0x1f,0x17,0x71,0xf1,0x02,0x31,0x00,0x96,0x44,0xa7,0x98,0xce,0x86,0x18,0xdf,
+		0x18,0x6e,0x28,0x59,0x69,0x28,0x4e,0xaf,0xc1,0xa6,0x03,0x93,0xa5,0x80,0xe9,0x52,
+		0x78,0x4e,0x7f,0xb6,0x9e,0x1c,0x4e,0xd3,0x7a,0x5f,0x03,0xc6,0x84,0xbc,0x72,0x72,
+		0x35,0x5d,0x4f,0x61,0x6a,0x4c,0x10,0xf8
+	}
+};
+
+/**
+ * Wrapper for the manifest verification key.
+ */
+static const struct manifest_verification_key default_manifest_key = {
+	.key_data = (const uint8_t*) &manifest_ecc_key,
+	.key_data_length = sizeof (struct manifest_verification_key_ecc),
+	.key = (const struct manifest_verification_key_header*) &manifest_ecc_key,
+	.pub_key_length = sizeof (manifest_ecc_key.key),
+	.signature = (const uint8_t*) &manifest_ecc_key +
+		(sizeof (manifest_ecc_key) - sizeof (manifest_ecc_key.signature)),
+	.sig_length = sizeof (manifest_ecc_key.signature),
+	.sig_hash = HASH_TYPE_SHA256
+};
+
+/**
+ * Public root key for verifying manifest key
+ *
+ * Note: This must be a DER encoded public key.
+ * It can contain more bytes that specified in the DER encoding, which will be ignored.
+ */
+static struct ecc_der_public_key manifest_root_key;
+
+/**
+ * Variable context for the PCD ECC verification wrapper.
+ */
+static struct signature_verification_ecc_state pcd_ecc_verify_context;
+
+/**
+ * Wrapper for PCD ECC verification.
+ */
+static struct signature_verification_ecc pcd_ecc_verify;
+
+/**
+ * Variable context for PCD signature verification.
+ */
+static struct manifest_verification_state pcd_verification_context;
+
+/**
+ * Signature verification for the PCD.
+ */
+static struct manifest_verification pcd_verification;
+
+/**
+ * Management for the PCD.
+ */
+static struct pcd_manager_flash platform_manifest;
+
+/**
+ * The PCD stored in the first region allocated for PCDs.
+ */
+static struct pcd_flash pcd_region1;
+
+/**
+ * Buffer for storing the PCD signature in region 1.
+ */
+static uint8_t pcd_region1_signature[ECC_DER_MAX_PUBLIC_LENGTH];
+
+/**
+ * Buffer for storing the PCD platform ID in region 1.
+ */
+static uint8_t pcd_region1_platform_id[MANIFEST_MAX_STRING];
+
+/**
+ * The PCD stored in the second region allocated for PCDs.
+ */
+static struct pcd_flash pcd_region2;
+
+/**
+ * Buffer for storing the PCD signature in region 1.
+ */
+static uint8_t pcd_region2_signature[ECC_DER_MAX_PUBLIC_LENGTH];
+
+/**
+ * Buffer for storing the PCD platform ID in region 1.
+ */
+static uint8_t pcd_region2_platform_id[MANIFEST_MAX_STRING];
+
+/**
+ * Variable context for the PCD handler.
+ */
+static struct manifest_cmd_handler_state pcd_handler_context;
+
+/**
+ * Command handler for PCD operations.
+ */
+static struct manifest_cmd_handler_pcd pcd_handler;
+
+/**
+ * Management for the CFM describing downstream components.
+ */
+static struct cfm_manager_flash component_manifest;
+
+/**
+ * Buffer for storing the CFM signature in region 1.
+ */
+static uint8_t cfm_region1_signature[ECC_DER_MAX_PUBLIC_LENGTH];
+
+/**
+ * Buffer for storing the CFM platform ID in region 1.
+ */
+static uint8_t cfm_region1_platform_id[MANIFEST_MAX_STRING];
+
+/**
+ * The component CFM stored in the first region allocated for CFMs.
+ */
+static struct cfm_flash cfm_region1;
+
+/**
+ * Buffer for storing the CFM signature in region 2.
+ */
+static uint8_t cfm_region2_signature[ECC_DER_MAX_PUBLIC_LENGTH];
+
+/**
+ * Buffer for storing the CFM platform ID in region 2.
+ */
+static uint8_t cfm_region2_platform_id[MANIFEST_MAX_STRING];
+
+/**
+ * The component CFM stored in the second region allocated for CFMs.
+ */
+static struct cfm_flash cfm_region2;
+
+/**
+ * Variable context for the CFM ECC verification wrapper.
+ */
+static struct signature_verification_ecc_state cfm_ecc_verify_context;
+
+/**
+ * Wrapper for CFM ECC verification.
+ */
+static struct signature_verification_ecc cfm_ecc_verify;
+
+/**
+ * Variable context for CFM signature verification.
+ */
+static struct manifest_verification_state cfm_verification_context;
+
+/**
+ * Signature verification for the CFM.
+ */
+static struct manifest_verification cfm_verification;
+
+/**
+ * Variable context for the CFM handler.
+ */
+static struct manifest_cmd_handler_state cfm_handler_context;
+
+/**
+ * Command handler for CFM operations.
+ */
+static struct manifest_cmd_handler_cfm cfm_handler;
+
+/**
+ * Flag indicating if the system was initialized with an active PCD.
+ */
+bool has_active_pcd;
+
+/**
+ * Flag indicating if there is an active PCD with at least one component configured.
+ */
+bool pcd_has_components;
+
+/**
+ * Maximum duration to wait for MCTP bridge to assign Cerberus an EID before attempting to get
+ * routing table.
+ */
+uint32_t get_routing_table_timeout_ms;
+
+/**
+ * Task to flush data to flash.
+ */
+static struct flush_data_background flush_data;
+
+/**
+ * State information for the system.
+ */
+static struct state_manager system_state;
+
+/**
+ * Command task handler for manifests.
+ */
+static struct event_task_handler *cmd_task_handler[2];
+
+/**
+ * Variable context for the task context for manifest and host recovery commands.
+ */
+static struct event_task_freertos_state cmd_task_context;
+
+/**
+ * Command task for executing manifest and host recovery commands.
+ */
+static struct event_task_freertos cmd_task;
+#endif
+
+#ifdef CMD_ENABLE_RESET_CONFIG
+/**
+ * Variable context for authorization signature verification.
+ */
+static struct signature_verification_ecc_state auth_verification_context;
+
+/**
+ * Signature verification for request authorization.
+ */
+static struct signature_verification_ecc auth_verification;
+
+/**
+ * Authorization instance for secure operation.
+ */
+static struct authorization_challenge auth_challenge[4];
+
+/**
+ * Authorization instance for insecure operation.
+ */
+static struct authorization_allowed auth_allowed;
+
+/**
+ * Authorization handler for commands.
+ */
+static struct cmd_authorization cmd_auth;
+
+/**
+ * List of manifests to clear for bypass mode.
+ */
+static const struct manifest_manager *bypass_manifests[1];
+
+/**
+ * List of manifests to clear to platform configuration.
+ */
+static const struct manifest_manager *config_manifests[1];
+
+/**
+ * List of component manifests to clear.
+ */
+static const struct manifest_manager *component_manifests[1];
+
+/**
+ * List of states to reset when requested.
+ */
+static struct state_manager *reset_state[3];
+
+/**
+ * Manager for handling requests to clear manifests.
+ */
+static struct config_reset config_manager;
+#endif
+
+/******************************************
+ * Attestation Measurement Data Structures
+ ******************************************/
+
+/* PCR 0 */
+/**
+ * Cerberus boot image (L0) measured data.
+ */
+static struct pcr_measured_data pcr_boot_image_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+};
+
+/**
+ * Cerberus application image (L1) measured data.
+ */
+static struct pcr_measured_data pcr_app_image_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+};
+
+/**
+ * TIP key manifest measured data.
+ */
+static struct pcr_measured_data pcr_tip_kmt_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+};
+
+/**
+ * TIP secondary key maniefst measured data.
+ */
+static struct pcr_measured_data pcr_tip_skmt_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+};
+
+/**
+ * BMC Bootblock measured data.
+ */
+static struct pcr_measured_data pcr_bb_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+};
+
+/**
+ * BMC BL31 measured data.
+ */
+static struct pcr_measured_data pcr_bl31_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+};
+
+/**
+ * BMC Optee measured data.
+ */
+static struct pcr_measured_data pcr_optee_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+};
+
+/**
+ * BMC Uboot measured data.
+ */
+static struct pcr_measured_data pcr_uboot_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+};
+
+/**
+ * Cerberus platform fw version measured data.
+ */
+static struct pcr_measured_data pcr_fw_version_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+};
+
+
+/* PCR 1 */
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+/**
+ * Cerberus PCD measured data.
+ */
+static struct pcr_measured_data pcr_pcd_measured_data = {
+	.type = PCR_DATA_TYPE_CALLBACK,
+	.data = {
+		.callback = {
+			.get_data = (pcr_data_get_measured_data) pcd_manager_get_pcd_measured_data,
+			.context = &platform_manifest.base
+		}
+	}
+};
+
+/**
+ * Cerberus platform manifest ID measured data.
+ */
+static struct pcr_measured_data pcr_pcd_id_measured_data = {
+	.type = PCR_DATA_TYPE_CALLBACK,
+	.data = {
+		.callback = {
+			.get_data = (pcr_data_get_measured_data) pcd_manager_get_id_measured_data,
+			.context = &platform_manifest.base
+		}
+	}
+};
+
+/**
+ * Cerberus platform manifest platform ID measured data.
+ */
+static struct pcr_measured_data pcr_pcd_platform_id_measured_data = {
+	.type = PCR_DATA_TYPE_CALLBACK,
+	.data = {
+		.callback = {
+			.get_data = (pcr_data_get_measured_data) pcd_manager_get_platform_id_measured_data,
+			.context = &platform_manifest.base
+		}
+	}
+};
+
+/**
+ * Cerberus CFM measured data.
+ */
+static struct pcr_measured_data pcr_cfm_measured_data = {
+	.type = PCR_DATA_TYPE_CALLBACK,
+	.data = {
+		.callback = {
+			.get_data = (pcr_data_get_measured_data) cfm_manager_get_cfm_measured_data,
+			.context = &component_manifest.base
+		}
+	}
+};
+
+/**
+ * Cerberus CFM initialization status measured data.
+ */
+static struct pcr_measured_data pcr_cfm_valid_measured_data = {
+	.type = PCR_DATA_TYPE_MEMORY,
+	.data = {
+		.memory = {
+			.buffer = NULL,
+			.length = 0,
+		}
+	}
+};
+
+/**
+ * Cerberus component manifest ID measured data.
+ */
+static struct pcr_measured_data pcr_cfm_id_measured_data = {
+	.type = PCR_DATA_TYPE_CALLBACK,
+	.data = {
+		.callback = {
+			.get_data =
+				(pcr_data_get_measured_data) cfm_manager_get_id_measured_data,
+			.context = &component_manifest.base
+		}
+	}
+};
+
+/**
+ * Cerberus component manifest ID measured data.
+ */
+static struct pcr_measured_data pcr_cfm_platform_id_measured_data = {
+	.type = PCR_DATA_TYPE_CALLBACK,
+	.data = {
+		.callback = {
+			.get_data =
+				(pcr_data_get_measured_data) cfm_manager_get_platform_id_measured_data,
+			.context = &component_manifest.base
+		}
+	}
+};
+
+/**
+ * PCR management for the CFM.
+ */
+static struct cfm_observer_pcr pcr_cfm;
+
+/**
+ * PCR management for the PCD.
+ */
+static struct pcd_observer_pcr pcr_pcd;
+#endif
+
+/**
+ *  Variable context for the virtual flash device.
+ */
+static struct spi_flash_state virtual_flash_context;
+
+/**
+ * Virtual flash as staging area for FW update
+ */
+struct spi_flash virtual_flash;
+
+/**
+ * Virtual flash master
+ */
+static struct tip_flash_master_virtual virtual_flash_master;
+
+/**
+ * Firmware image partitioning information.
+ */
+static struct firmware_flash_map fw_flash_map[NUM_TIP_FW_UPDATER];
+
+extern void vPortSVCHandler (void);
+extern void xPortPendSVHandler (void);
+extern void xPortSysTickHandler (void);
+extern uint32_t *_stack_start_os;
+
+/**
+ * Run low-level initialization for TIP hardware.
+ */
+static void hardware_app_init ()
+{
+	DISABLE_INTERRUPTS ();
+	NVIC_ClearAll ();
+	tip_twd_common_init (false, WD_PRESET_L1, WD_WDIV_L1);
+	serial_printf_init ();
+	NVIC_Init (TRUE);
+	NVIC_Reset ();
+	SCS_Init ();
+	SCS_FPEnableAccess (TRUE);
+
+	/* Freertos use this address as MSP address. */
+	NVIC_InstallSwTrap (NVIC_TRAP_INIT_SP, (SW_HANDLER_T) (&_stack_start_os - 4));
+
+	for (uint32_t i = 1; i < NVIC_TRAP_NUM; i++) {
+		NVIC_InstallSwTrap (i, (SW_HANDLER_T) NVIC_TrapHandlerCommon);
+		NVIC_ClearInt (i);
+	}
+
+	SCS_ClearPendingSysTickInt ();
+
+	for (uint32_t i = 0; i < NVIC_INTERRUPT_NUM; i++) {
+		NVIC_EnableInt (i, FALSE);
+		NVIC_InstallSwHandler (i, (SW_HANDLER_T) NVIC_IntHandlerCommon);
+		NVIC_ClearInt (i);
+	}
+
+	NVIC_InstallSwTrap (NVIC_TRAP_SVC, (SW_HANDLER_T) vPortSVCHandler);
+	NVIC_InstallSwTrap (NVIC_TRAP_PEND_SV, (SW_HANDLER_T) xPortPendSVHandler);
+	NVIC_InstallSwTrap (NVIC_TRAP_SYST, (SW_HANDLER_T) xPortSysTickHandler);
+
+	/* Clear BMC reset event */
+	SET_REG_FIELD (TIP_CTL_STS, TIP_CTL_STS_DBGRST_STS, 1);
+	SET_REG_FIELD (TIP_CTL_STS, TIP_CTL_STS_BMC_CRST_EV, 1);
+
+	/* Detect BMC reset interrupt: INT46 Level High BMC CPU reset Interrupt */
+	NVIC_InstallSwHandler (NVIC_INT_46, (SW_HANDLER_T) NVIC_BMC_reset);
+	NVIC_ConfigPriority (NVIC_INT_46, 0x5);
+	NVIC_ClearInt (NVIC_INT_46);
+	NVIC_EnableInt (NVIC_INT_46, TRUE);
+	tip_twd_common_init (true, WD_PRESET_L1, WD_WDIV_L1);
+	ENABLE_INTERRUPTS ();
+}
+
+/**
+ * Initialize crypto engines shared between system components.
+ *
+ * @return  0 if the operations was successful or an error code.
+ */
+static int initialize_crypto ()
+{
+	int status;
+
+	status = tip_init_rom_ncl ();
+	if (status != 0) {
+		return status;
+	}
+
+	status = tip_hash_ncl_init (&system_hash);
+	if (status != 0) {
+		return status;
+	}
+
+	status = hash_thread_safe_init (&shared_hash, &system_hash.base);
+	if (status != 0) {
+		return status;
+	}
+
+	status = tip_ecc_hw_ncl_init (&hw_ecc);
+	if (status != 0) {
+		return status;
+	}
+
+#if defined CERBERUS_ENABLE_COMPONENT_ATTESTATION && defined ATTESTATION_SUPPORT_RSA_CHALLENGE
+	status = rsa_mbedtls_init (&system_rsa);
+	if (status != 0) {
+		return status;
+	}
+
+	status = rsa_thread_safe_init (&shared_rsa, &system_rsa.base);
+	if (status != 0) {
+		return status;
+	}
+#endif
+
+	status = ecc_ecc_hw_init (&system_ecc, &hw_ecc.base);
+	if (status != 0) {
+		return status;
+	}
+
+	status = ecc_thread_safe_init (&shared_ecc, &system_ecc.base);
+	if (status != 0) {
+		return status;
+	}
+
+	status = x509_mbedtls_init (&system_x509);
+	if (status != 0) {
+		return status;
+	}
+
+	status = x509_thread_safe_init (&shared_x509, &system_x509.base);
+	if (status != 0) {
+		return status;
+	}
+
+	status = tip_rng_ncl_init (&system_rng);
+	if (status != 0) {
+		return status;
+	}
+
+	status = rng_thread_safe_init (&shared_rng, &system_rng.base);
+	if (status != 0) {
+		return status;
+	}
+
+	return 0;
+}
+
+/**
+ * Verify the PCR hash of the shared PCR values with the bootloader.
+ *
+ * @param hash The initialized hash engine to calculate SHA256.
+ *
+ * @return 0 if the verification is successful or an error code.
+ */
+static int verify_stored_pcr_hash (struct hash_engine *hash)
+{
+	struct riot_shared_attestation *keys = (struct riot_shared_attestation *) RIOT_SHARED_ADDRESS;
+	uint8_t pcr_hash[SHA256_HASH_LENGTH];
+	int status;
+
+	status = hash->calculate_sha256 (hash, (uint8_t *) RIOT_SHARED_ADDRESS,
+		sizeof (struct riot_shared_attestation) - sizeof (keys->attestation_hash), pcr_hash,
+		sizeof (pcr_hash));
+	if (status != 0) {
+		return status;
+	}
+
+	if (memcmp (pcr_hash, keys->attestation_hash, SHA256_HASH_LENGTH) != 0) {
+		status = -1;
+	}
+
+	return status;
+}
+
+#ifdef CMD_SUPPORT_ENCRYPTED_SESSIONS
+/**
+ * Initialize management of encrypted sessions.
+ *
+ * @return 0 if session management was successfully initialized or an error code.
+ */
+static int initialize_session_management ()
+{
+	int status;
+
+	status = tip_aes_ncl_init (&session_aes);
+	if (status != 0) {
+		return status;
+	}
+
+	status = session_manager_ecc_init (&session, &session_aes.base, &shared_ecc.base,
+		&shared_hash.base, &shared_rng.base, &riot, session_entries, CERBERUS_MAX_SESSIONS, NULL, 0,
+		NULL);
+	return status;
+}
+#endif
+
+/**
+ * @brief Initialize TIP flash map for firmware updater
+ *
+ * @param index The index of flash map
+ * @return 0 if the flash map was successfully initialized or an error code
+ */
+static int tip_fw_flash_map_init (int index, uint32_t combo0_size)
+{
+	uint32_t updater_size;
+	if (index >= NUM_TIP_FW_UPDATER) {
+		return FIRMWARE_UPDATE_INVALID_ARGUMENT;
+	}
+
+	if (!main_flash || !recovery_flash) {
+		return FLASH_HW_NOT_INIT;
+	}
+
+	memset (&fw_flash_map[index], 0, sizeof (struct firmware_flash_map));
+
+	if (index == TIP_FW_UPDATER_COMBO_0_2) {
+		updater_size = combo0_size + ROT_COMBO1_MAX_SIZE_DEFAULT;
+	}
+	else {
+		updater_size = ROT_COMBO1_MAX_SIZE_DEFAULT;
+	}
+
+	fw_flash_map[index].active_flash = &main_flash->base;
+	fw_flash_map[index].active_addr = (index == TIP_FW_UPDATER_COMBO_0_2) ?
+		ROT_COMBO0_ADDR_DEFAULT : combo0_size;
+	fw_flash_map[index].active_size = updater_size;
+	fw_flash_map[index].backup_flash = NULL;
+	fw_flash_map[index].staging_flash = &virtual_flash.base;
+	fw_flash_map[index].staging_addr = ROT_STAGING_ADDR;
+	fw_flash_map[index].staging_size = updater_size;
+	fw_flash_map[index].recovery_flash = &recovery_flash->base;
+	fw_flash_map[index].recovery_addr = recovery_flash_start_offset + index * combo0_size;
+	fw_flash_map[index].recovery_size = updater_size;
+	fw_flash_map[index].rec_backup_flash = NULL;
+
+	platform_printf (KMAG "Updater%d active image   [%#010lx:%#010lx]" NEWLINE, index,
+		fw_flash_map[index].active_addr,
+		fw_flash_map[index].active_addr + fw_flash_map[index].active_size);
+	platform_printf ("Updater%d recovery image [%#010lx:%#010lx]" NEWLINE KNRM, index,
+		fw_flash_map[index].recovery_addr,
+		fw_flash_map[index].recovery_addr + fw_flash_map[index].recovery_size);
+
+	return 0;
+}
+
+#ifdef CMD_ENABLE_RESET_CONFIG
+/**
+ * Initialize management of configuration reset requests.
+ *
+ * @return 0 if the configuration manager was successfully initialized or an error code.
+ */
+static int initialize_config_reset_management ()
+{
+	const struct riot_keys *keys;
+	int status;
+	int i;
+	int j;
+	int k;
+
+	if (!TIP_SECBOOT_IS_ACTIVE ()) {
+		status = authorization_allowed_init (&auth_allowed);
+		if (status != 0) {
+			return status;
+		}
+
+		status = cmd_authorization_init (&cmd_auth, &auth_allowed.base, &auth_allowed.base,
+			&auth_allowed.base, &auth_allowed.base, &auth_allowed.base);
+	}
+	else {
+		status = signature_verification_ecc_init (&auth_verification, &auth_verification_context,
+			&shared_ecc.base, NULL, 0);
+		if (status != 0) {
+			return status;
+		}
+
+		keys = riot_key_manager_get_riot_keys (&riot);
+
+		/* Authorization for reverting to bypass mode. */
+		status = authorization_challenge_init (&auth_challenge[0], &shared_rng.base,
+			&shared_hash.base, &shared_ecc.base, keys->alias_key, keys->alias_key_length,
+			&auth_verification.base);
+		if (status != 0) {
+			riot_key_manager_release_riot_keys (&riot, keys);
+			return status;
+		}
+
+		/* Authorization for restore factory default state. */
+		status = authorization_challenge_init_with_tag (&auth_challenge[1], &shared_rng.base,
+			&shared_hash.base, &shared_ecc.base, keys->alias_key, keys->alias_key_length,
+			&auth_verification.base, CERBERUS_PROTOCOL_FACTORY_RESET);
+		if (status != 0) {
+			riot_key_manager_release_riot_keys (&riot, keys);
+			return status;
+		}
+
+		/* Authorization for clearing platform config. */
+		status = authorization_challenge_init_with_tag (&auth_challenge[2], &shared_rng.base,
+			&shared_hash.base, &shared_ecc.base, keys->alias_key, keys->alias_key_length,
+			&auth_verification.base, CERBERUS_PROTOCOL_CLEAR_PCD);
+		if (status != 0) {
+			riot_key_manager_release_riot_keys (&riot, keys);
+			return status;
+		}
+
+		/* Authorization for clearing component manifests. */
+		status = authorization_challenge_init_with_tag (&auth_challenge[3], &shared_rng.base,
+			&shared_hash.base, &shared_ecc.base, keys->alias_key, keys->alias_key_length,
+			&auth_verification.base, CERBERUS_PROTOCOL_CLEAR_CFM);
+		riot_key_manager_release_riot_keys (&riot, keys);
+		if (status != 0) {
+			return status;
+		}
+
+		status = cmd_authorization_init (&cmd_auth, &auth_challenge[0].base, &auth_challenge[1].base,
+			&auth_challenge[2].base, &auth_challenge[3].base, NULL);
+	}
+
+	if (status != 0) {
+		return status;
+	}
+
+	i = 0;
+	j = 0;
+	k = 0;
+
+	config_manifests[0] = &platform_manifest.base.base;
+	reset_state[j++] = &system_state;
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	component_manifests[k++] = &component_manifest.base.base;
+#endif
+
+	return config_reset_init (&config_manager, bypass_manifests, i, config_manifests, 1,
+		component_manifests, k, reset_state, j, &riot, NULL, NULL, NULL, 0, NULL);
+}
+#endif
+
+/**
+ * Initialize and start the Cerberus firmware updater.
+ *
+ * @param combo0_size size allocated for combo 0. Typically 512KB or 2MB.
+ * @return 0 if the firmware updater was successfully initialized or an error code.
+ */
+static int initialize_firmware_updater (uint32_t combo0_size)
+{
+	int allowed_version = -1;
+	int status;
+
+	for (int i = TIP_FW_UPDATER_COMBO_0_2; i < NUM_TIP_FW_UPDATER; i++) {
+		status = tip_image_combo_init (&updating_img[i]);
+		if (status != 0) {
+			return status;
+		}
+
+		status = tip_fw_flash_map_init (i, combo0_size);
+		if (status != 0) {
+			return status;
+		}
+
+		/* TIP has its own API tip_version_set_and_check() to check each FW component within the
+		 * combo image to avoid roll-back during the update flow. No need to provide the allowed
+		 * revision to the updater. */
+		status = firmware_update_init_no_firmware_header (&fw_updater[i], &fw_updater_context[i],
+			&fw_flash_map[i], &running_state.base, &updating_img[i].base, &shared_hash.base,
+			allowed_version);
+		if (status != 0) {
+			return status;
+		}
+	}
+
+	status = tip_fw_update_task_init (&cerberus_update, fw_updater, NUM_TIP_FW_UPDATER, &tip_system);
+
+	return status;
+}
+
+/**
+ * Initialize I2C channel for receiving commands.
+ *
+ * @return 0 if the command channel was successfully initialized or an error code.
+ */
+static int init_cmd_interface ()
+{
+	struct device_manager_full_capabilities i2c_caps;
+	struct cmd_interface *spdm = NULL;
+	struct manifest_cmd_interface *pcd = NULL;
+	struct pcd_manager *pcd_manager = NULL;
+	struct manifest_cmd_interface *cfm = NULL;
+	struct cfm_manager *cfm_manager = NULL;
+	struct config_reset *config_reset = NULL;
+	struct cmd_authorization *cmd_authorization = NULL;
+	struct pcd_rot_info rot_info = {
+		.is_pa_rot = DEFAULT_IS_PA_ROT,
+		.port_count = 0,
+		.components_count = 0,
+		.i2c_slave_addr = CERBERUS_SLAVE_ADDR,
+		.eid = MCTP_BASE_PROTOCOL_BMC_TIP_EID,
+		.bridge_i2c_addr = 0,
+		.bridge_eid = MCTP_BASE_PROTOCOL_BMC_EID,
+		.attestation_success_retry = CERBERUS_AUTHENTICATED_CADENCE_MS,
+	 	.attestation_fail_retry = CERBERUS_UNAUTHENTICATED_CADENCE_MS,
+		.discovery_fail_retry = CERBERUS_UNIDENTIFIED_TIMEOUT_CADENCE_MS,
+		.mctp_ctrl_timeout = CERBERUS_MCTP_CTRL_PROTOCOL_TIMEOUT_MS,
+		.mctp_bridge_get_table_wait = CERBERUS_GET_ROUTING_TABLE_TIMEOUT_MS,
+		.mctp_bridge_additional_timeout = CERBERUS_MCTP_BRIGE_ADDITIONAL_TIMEOUT_MS,
+		.attestation_rsp_not_ready_max_duration = CERBERUS_RSP_NOT_READY_MAX_TIMEOUT_MS,
+		.attestation_rsp_not_ready_max_retry = CERBERUS_RSP_NOT_READY_MAX_RETRY
+	};
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	struct pcd *active_pcd = platform_manifest.base.get_active_pcd (&platform_manifest.base);
+	struct pcd_mctp_bridge_components_info component;
+	const uint8_t *cfm_authentication_status;
+	uint8_t i_component;
+	struct rsa_engine *rsa = NULL;
+#endif
+	uint8_t i_device = 2;
+	uint8_t eid = rot_info.eid;
+	int status;
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	if (active_pcd) {
+		status = active_pcd->get_rot_info (active_pcd, &rot_info);
+		if (status != 0) {
+			debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+				INIT_LOGGING_ROT_CONFIG, status, 0);
+		}
+	}
+
+	if (active_pcd) {
+		pcd_has_components = (rot_info.components_count != 0);
+		get_routing_table_timeout_ms = rot_info.mctp_bridge_get_table_wait;
+	}
+	else {
+		get_routing_table_timeout_ms = CERBERUS_GET_ROUTING_TABLE_TIMEOUT_MS;
+	}
+#endif
+
+	status = device_manager_init (&device_manager, 4, rot_info.components_count,
+		rot_info.is_pa_rot ? DEVICE_MANAGER_PA_ROT_MODE : DEVICE_MANAGER_AC_ROT_MODE,
+		DEVICE_MANAGER_MASTER_AND_SLAVE_BUS_ROLE, rot_info.attestation_fail_retry,
+		rot_info.attestation_success_retry, rot_info.discovery_fail_retry,
+		rot_info.mctp_ctrl_timeout, rot_info.mctp_bridge_additional_timeout,
+		rot_info.attestation_rsp_not_ready_max_duration,
+		rot_info.attestation_rsp_not_ready_max_retry);
+	if (status != 0) {
+		goto done;
+	}
+
+	/* Update entry for Cerberus */
+	status = device_manager_update_not_attestable_device_entry (&device_manager,
+		DEVICE_MANAGER_SELF_DEVICE_NUM, eid, rot_info.i2c_slave_addr,
+		DEVICE_MANAGER_NOT_PCD_COMPONENT);
+	if (status != 0) {
+		goto done;
+	}
+
+	device_manager_get_device_capabilities (&device_manager, DEVICE_MANAGER_SELF_DEVICE_NUM,
+		&i2c_caps);
+
+	i2c_caps.request.security_mode |= DEVICE_MANAGER_SECURITY_CONFIDENTIALITY;
+	i2c_caps.request.ecc_key_strength = DEVICE_MANAGER_ECC_KEY_256;
+	i2c_caps.request.ecdsa = 1;
+	i2c_caps.request.rsa_key_strength = DEVICE_MAANGER_RSA_KEY_NONE;
+	i2c_caps.request.rsa = 0;
+	i2c_caps.request.aes_enc_key_strength = DEVICE_MANAGER_AES_KEY_256;
+	i2c_caps.request.pfm_support = 0;
+	i2c_caps.request.fw_protection = 1;
+
+	device_manager_update_device_capabilities (&device_manager, DEVICE_MANAGER_SELF_DEVICE_NUM,
+		&i2c_caps);
+
+	/* Update entry for BMC */
+	status = device_manager_update_not_attestable_device_entry (&device_manager,
+		DEVICE_MANAGER_MCTP_BRIDGE_DEVICE_NUM, rot_info.bridge_eid, rot_info.bridge_i2c_addr,
+		DEVICE_MANAGER_NOT_PCD_COMPONENT);
+	if (status != 0) {
+		goto done;
+	}
+
+	/* Update entry for in-band utility */
+	status = device_manager_update_not_attestable_device_entry (&device_manager, i_device,
+		MCTP_BASE_PROTOCOL_IB_EXT_MGMT, rot_info.bridge_i2c_addr, DEVICE_MANAGER_NOT_PCD_COMPONENT);
+	if (status != 0) {
+		goto done;
+	}
+
+	++i_device;
+
+	/* Update entry for out-of-band utility */
+	status = device_manager_update_not_attestable_device_entry (&device_manager, i_device,
+		MCTP_BASE_PROTOCOL_OOB_EXT_MGMT, rot_info.bridge_i2c_addr,
+		DEVICE_MANAGER_NOT_PCD_COMPONENT);
+	if (status != 0) {
+		goto done;
+	}
+
+	++i_device;
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	if (active_pcd) {
+		for (i_component = 0; i_component < rot_info.components_count; ++i_component) {
+			status = active_pcd->get_next_mctp_bridge_component (active_pcd, &component,
+				(i_component == 0));
+			if (status == 0) {
+				status = device_manager_update_mctp_bridge_device_entry (&device_manager, i_device,
+					component.pci_vid, component.pci_device_id, component.pci_subsystem_vid,
+					component.pci_subsystem_id, component.components_count, component.component_id,
+					i_component);
+				if (status != 0) {
+					goto done;
+				}
+
+				i_device += component.components_count;
+			}
+			else if (status == MANIFEST_ELEMENT_NOT_FOUND) {
+				break;
+			}
+			else {
+				debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+					INIT_LOGGING_PCD_COMPONENT_ERROR, i_component, status);
+
+				device_manager_mark_component_attestation_invalid (&device_manager);
+
+				break;
+			}
+		}
+
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_INFO, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCD_COMPONENT, i_device, i_component);
+	}
+#endif
+
+	status = attestation_responder_init_no_aux (&system_attestation_responder, &riot,
+		&shared_hash.base, &shared_ecc.base, &shared_rng.base, &pcr_storage,
+		CERBERUS_PROTOCOL_PROTOCOL_VERSION, CERBERUS_PROTOCOL_PROTOCOL_VERSION);
+	if (status != 0) {
+		goto done;
+	}
+
+#ifdef CMD_ENABLE_RESET_CONFIG
+	config_reset = &config_manager;
+	cmd_authorization = &cmd_auth;
+#endif
+	status = cmd_background_handler_init (&background_handler, &background_handler_context,
+		&system_attestation_responder, &shared_hash.base, config_reset, &riot,
+		&cmd_background_task.base);
+	if (status != 0) {
+		goto done;
+	}
+
+	status = event_task_freertos_init (&cmd_background_task, &cmd_background_context, &tip_system,
+		background_handlers, 1);
+	if (status != 0) {
+		goto done;
+	}
+
+	fw_version_list[0] = version;
+	fw_version_list[1] = riot_core_version;
+	firmware_version.count = 2;
+	firmware_version.id = fw_version_list;
+
+	status = tip_cmd_channel_init (&system_i2c, 0, 0xfffce000, 0x1000);
+	if (status != 0) {
+		goto done;
+	}
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	pcd = &pcd_handler.base.base_cmd;
+	pcd_manager = &platform_manifest.base;
+	cfm = &cfm_handler.base.base_cmd;
+	cfm_manager = &component_manifest.base;
+#endif
+
+	status = cmd_interface_tip_init (&system_cmd_interface, &cerberus_update.base,
+		&system_attestation_responder, &device_manager, &pcr_storage, &shared_hash.base,
+		&background_handler.base_cmd, &firmware_version, &riot, cmd_authorization, &tip_cmd_device.base,
+		pcd, pcd_manager, cfm, cfm_manager, CERBERUS_PROTOCOL_MSFT_PCI_VID, TIP_DEVICE_ID_CERBERUS,
+		CERBERUS_PROTOCOL_MSFT_PCI_VID, TIP_SUBSYSTEM_DEVICE_ID_CERBERUS, &session.base);
+	if (status != 0) {
+		goto done;
+	}
+
+#if defined ATTESTATION_SUPPORT_SPDM && defined CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	status = cmd_interface_spdm_init (&spdm_cmd_interface);
+	if (status != 0) {
+		goto done;
+	}
+	spdm = &spdm_cmd_interface.base;
+#endif
+
+	status = cmd_interface_mctp_control_init (&mctp_control_cmd_interface, &device_manager,
+		CERBERUS_PROTOCOL_MSFT_PCI_VID, CERBERUS_PROTOCOL_PROTOCOL_VERSION);
+	if (status != 0) {
+		goto done;
+	}
+
+	status = mctp_interface_init (&system_interface, &system_cmd_interface.base,
+		&mctp_control_cmd_interface.base, spdm, &device_manager);
+	if (status != 0) {
+		goto done;
+	}
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	status = device_manager_get_attestation_status (&device_manager, &cfm_authentication_status);
+	if (ROT_IS_ERROR (status)) {
+		goto done;
+	}
+
+	pcr_cfm_valid_measured_data.data.memory.buffer = cfm_authentication_status;
+	pcr_cfm_valid_measured_data.data.memory.length = status;
+
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_CFM_VALID,
+		&pcr_cfm_valid_measured_data);
+
+	/* Get attestation status buffer from device manager and initialize PCR store entry with it */
+	status = pcr_store_update_versioned_buffer (&pcr_storage, &shared_hash.base,
+		PCR_MEASUREMENT_TYPE_CONFIG_CFM_VALID, cfm_authentication_status, status, true, 1);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_CONFIG_CFM_VALID, status);
+	}
+
+	status = hash_mbedtls_init (&attestation_hash_sw);
+	if (status != 0) {
+		goto done;
+	}
+
+#ifdef ATTESTATION_SUPPORT_RSA_CHALLENGE
+	rsa = &shared_rsa.base;
+#endif
+
+	if (active_pcd && pcd_has_components) {
+		status = attestation_requester_init (&system_attestation_requester, &attestation_state,
+			&system_interface, &system_i2c.base, &shared_hash.base, &attestation_hash_sw.base,
+			&shared_ecc.base, rsa, &shared_x509.base, &shared_rng.base, &riot,
+			&device_manager, &component_manifest.base);
+		if (status != 0) {
+			goto done;
+		}
+
+#ifdef ATTESTATION_SUPPORT_CERBERUS_CHALLENGE
+		status = cmd_interface_system_add_cerberus_protocol_observer (&system_cmd_interface,
+			&system_attestation_requester.cerberus_rsp_observer);
+		if (status != 0) {
+			goto done;
+		}
+#endif
+
+#ifdef ATTESTATION_SUPPORT_SPDM
+		status = cmd_interface_spdm_add_spdm_protocol_observer (&spdm_cmd_interface,
+			&system_attestation_requester.spdm_rsp_observer);
+		if (status != 0) {
+			goto done;
+		}
+#endif
+
+#ifdef ATTESTATION_SUPPORT_DEVICE_DISCOVERY
+		status = cmd_interface_mctp_control_add_mctp_control_protocol_observer (
+			&mctp_control_cmd_interface, &system_attestation_requester.mctp_rsp_observer);
+		if (status != 0) {
+			goto done;
+		}
+
+		status = cfm_manager_add_observer (&component_manifest.base,
+			&system_attestation_requester.cfm_observer);
+		if (status != 0) {
+			goto done;
+		}
+#endif
+	}
+#endif
+
+done:
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	platform_manifest.base.free_pcd (&platform_manifest.base, active_pcd);
+#endif
+	return status;
+}
+
+/**
+ * Start the command interface tasks.
+ *
+ * @return 0 if the command channel was successfully started or an error code.
+ */
+static int start_cmd_interface ()
+{
+	int status;
+
+	status = event_task_freertos_start (&cmd_background_task, (4 * 256) + 128, "CmdBgnd",
+		CERBERUS_PRIORITY_NORMAL);
+	if (status != 0) {
+		return status;
+	}
+
+	status = mctp_cmd_task_init (&system_cmd_task, &system_i2c.base, &system_interface,
+		CERBERUS_PRIORITY_HIGH, 6 * 256);
+	if (status != 0) {
+		return status;
+	}
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	if (has_active_pcd && pcd_has_components) {
+		status = attestation_requester_task_init (&attestation_requester_task,
+			&system_attestation_requester, &device_manager, &pcr_storage,
+			PCR_MEASUREMENT_TYPE_CONFIG_CFM_VALID, 1, CERBERUS_PRIORITY_NORMAL, 6 * 256);
+		if (status != 0) {
+			return status;
+		}
+
+		/* Initialize timer to be used for delaying routing table sync requests. */
+		status = platform_timer_create (&routing_table_rq_timer,
+			(timer_callback) attestation_requester_refresh_routing_table,
+			&system_attestation_requester);
+		if (status != 0) {
+			return status;
+		}
+
+
+		/* Wait for MCTP bridge to send a Set EID in response to the Discovery Notify.  If
+			* response does not come within get_routing_table_timeout_ms, then request routing
+			* table.  This does not need to happen on a POR, since BMC reset handler would start
+			* the timer. */
+		status = platform_timer_arm_one_shot (&routing_table_rq_timer,
+			get_routing_table_timeout_ms);
+		if (status != 0) {
+			debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_ATTESTATION,
+				ATTESTATION_LOGGING_BRIDGE_FAILED_TO_DETECT_MCTP_BRIDGE_RESET, status, 0);
+		}
+	}
+#endif
+
+	return 0;
+}
+
+/**
+ * Allocate a new buffer for the RIoT key and copy the data from the temporary location.
+ *
+ * @param dest Output for the new buffer to be allocated.
+ * @param length Output for the size of the data.
+ * @param src The RIoT data to be copied.
+ * @param src_length Length of the RIoT data.
+ * @param name Name of the RIoT data being copied.
+ * @param id Logging ID for the key.
+ */
+static void copy_riot_key (uint8_t **dest, size_t *length, const uint8_t *src, int src_length,
+	int id)
+{
+	if (src_length > 0) {
+		*dest = platform_malloc (src_length);
+		if (*dest != NULL) {
+			memcpy (*dest, src, src_length);
+			*length = src_length;
+		}
+	}
+	else if (src_length < 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_RIOT_KEY_TOO_BIG, id, 0);
+	}
+	else {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_NO_RIOT_KEY_DATA_AVAILABLE, id, 0);
+	}
+}
+
+/**
+ * Get the RIoT keys passed from the bootloader and store them in the current memory space.
+ *
+ * @param riot_core Location to copy the RIoT keys to.
+ */
+static void get_riot_keys (struct riot_keys *riot_core)
+{
+	struct riot_shared_attestation *keys = (struct riot_shared_attestation *) RIOT_SHARED_ADDRESS;
+
+	memset (riot_core, 0, sizeof (struct riot_keys));
+
+	copy_riot_key ((uint8_t **) &riot_core->devid_cert, &riot_core->devid_cert_length,
+		keys->devid_cert, keys->devid_cert_length, INIT_RIOT_KEY_DEVICE_ID);
+
+	copy_riot_key ((uint8_t **) &riot_core->devid_csr, &riot_core->devid_csr_length,
+		keys->devid_csr, keys->devid_csr_length, INIT_RIOT_KEY_DEVICE_ID_CSR);
+
+	copy_riot_key ((uint8_t **) &riot_core->alias_key, &riot_core->alias_key_length,
+		keys->alias_key, keys->alias_key_length, INIT_RIOT_KEY_ALIAS_KEY);
+
+	copy_riot_key ((uint8_t **) &riot_core->alias_cert, &riot_core->alias_cert_length,
+		keys->alias_cert, keys->alias_cert_length, INIT_RIOT_KEY_ALIAS_CERT);
+
+	strncpy (riot_core_version, keys->riot_version, sizeof (riot_core_version) - 1);
+	riot_core_version[sizeof (riot_core_version) - 1] = '\0';
+}
+
+/**
+ * Initialize the manager for RIoT certificates and keys.
+ *
+ * @return 0 if the RIoT manager was successfully initialized or an error code.
+ */
+static int initialize_riot_manager ()
+{
+	struct riot_keys riot_core;
+	int status;
+
+	get_riot_keys (&riot_core);
+
+	status = flash_store_contiguous_blocks_init_variable_storage_decreasing (&keystore_flash,
+		&keystore_flash_context, &main_flash->base, KEY_STORE_ADDR (manifest_end_flash_addr),
+		MAIN_KEYSTORE_MAX_KEYS, 0, &shared_hash.base);
+	if (status != 0) {
+		return status;
+	}
+
+	status = keystore_flash_init (&main_keystore, &keystore_flash.base);
+	if (status != 0) {
+		return status;
+	}
+
+	status = riot_key_manager_init_static (&riot, &main_keystore.base, &riot_core,
+		&shared_x509.base);
+
+	return status;
+}
+
+/**
+ * Initialize the Cerberus attestation measurements.
+ *
+ * @param hash Hash to use to generate the measurement.
+ *
+ * @return 0 if attestation was successfully initialized or an error code.
+ */
+static int initialize_cerberus_attestation (struct hash_engine *hash)
+{
+	struct riot_shared_attestation *keys = (struct riot_shared_attestation *) RIOT_SHARED_ADDRESS;
+	uint8_t num_pcr_measurements[PCR_CERBERUS_NUM_BANKS] = {
+		PCR_CERBERUS_PLATFORM_MEASUREMENTS
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+		,PCR_CERBERUS_MANIFESTS_MEASUREMENTS
+#endif
+	};
+
+	int status;
+
+	status = pcr_store_init (&pcr_storage, num_pcr_measurements, sizeof (num_pcr_measurements));
+	if (status != 0) {
+		return status;
+	}
+
+	/* Init FW version measured data. */
+	pcr_fw_version_measured_data.type = PCR_DATA_TYPE_MEMORY;
+	pcr_fw_version_measured_data.data.memory.buffer = (uint8_t *) version;
+	pcr_fw_version_measured_data.data.memory.length = strlen (version) + 1;
+
+	/* Init boot image measured data */
+	pcr_boot_image_measured_data.type = PCR_DATA_TYPE_MEMORY;
+	pcr_boot_image_measured_data.data.memory.buffer = keys->riot_hash;
+	pcr_boot_image_measured_data.data.memory.length = sizeof (keys->riot_hash);
+
+	/* Init app image measured data */
+	pcr_app_image_measured_data.type = PCR_DATA_TYPE_MEMORY;
+	pcr_app_image_measured_data.data.memory.buffer = keys->app_hash;
+	pcr_app_image_measured_data.data.memory.length = sizeof (keys->app_hash);
+
+	/* Init KMT image measured data */
+	pcr_tip_kmt_measured_data.type = PCR_DATA_TYPE_MEMORY;
+	pcr_tip_kmt_measured_data.data.memory.buffer = keys->keys_hash;
+	pcr_tip_kmt_measured_data.data.memory.length = sizeof (keys->keys_hash);
+
+	/* Init SKMT image measured data */
+	pcr_tip_skmt_measured_data.type = PCR_DATA_TYPE_MEMORY;
+	pcr_tip_skmt_measured_data.data.memory.buffer = keys->skmt_hash;
+	pcr_tip_skmt_measured_data.data.memory.length = sizeof (keys->skmt_hash);
+
+	/* Init Bootblock image measured data */
+	pcr_bb_measured_data.type = PCR_DATA_TYPE_MEMORY;
+	pcr_bb_measured_data.data.memory.buffer = bmc_component_get_digest_buf (IMG_BOOTBLOCK);
+	pcr_bb_measured_data.data.memory.length = SHA512_HASH_LENGTH;
+
+	/* Init BL31 image measured data */
+	pcr_bl31_measured_data.type = PCR_DATA_TYPE_MEMORY;
+	pcr_bl31_measured_data.data.memory.buffer = bmc_component_get_digest_buf (IMG_BL31);
+	pcr_bl31_measured_data.data.memory.length = SHA512_HASH_LENGTH;
+
+	/* Init optee image measured data */
+	pcr_optee_measured_data.type = PCR_DATA_TYPE_MEMORY;
+	pcr_optee_measured_data.data.memory.buffer = bmc_component_get_digest_buf (IMG_OPTEE);
+	pcr_optee_measured_data.data.memory.length = SHA512_HASH_LENGTH;
+
+	/* Init uboot image measured data */
+	pcr_uboot_measured_data.type = PCR_DATA_TYPE_MEMORY;
+	pcr_uboot_measured_data.data.memory.buffer = bmc_component_get_digest_buf (IMG_UBOOT);
+	pcr_uboot_measured_data.data.memory.length = SHA512_HASH_LENGTH;
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_BOOT_IMG,
+		PCR_TCG_EVENT_TYPE_PLATFORM_BOOT_IMG);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_BOOT_IMG,
+		&pcr_boot_image_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_APP_IMG,
+		PCR_TCG_EVENT_TYPE_PLATFORM_APP_IMG);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_APP_IMG,
+		&pcr_app_image_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_FW_VERSION,
+		PCR_TCG_EVENT_TYPE_PLATFORM_CERBERUS_FW_VERSION);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_FW_VERSION,
+		&pcr_fw_version_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_KMT_IMG,
+		PCR_TCG_EVENT_TYPE_PLATFORM_KMT_IMG);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_KMT_IMG,
+		&pcr_tip_kmt_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_SKMT_IMG,
+		PCR_TCG_EVENT_TYPE_PLATFORM_SKMT_IMG);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_SKMT_IMG,
+		&pcr_tip_skmt_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_BB_IMG,
+		PCR_TCG_EVENT_TYPE_PLATFORM_BB_IMG);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_BB_IMG,
+		&pcr_bb_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_BL31_IMG,
+		PCR_TCG_EVENT_TYPE_PLATFORM_BL31_IMG);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_BL31_IMG,
+		&pcr_bl31_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_OPTEE_IMG,
+		PCR_TCG_EVENT_TYPE_PLATFORM_OPTEE_IMG);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_OPTEE_IMG,
+		&pcr_optee_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_UBOOT_IMG,
+		PCR_TCG_EVENT_TYPE_PLATFORM_UBOOT_IMG);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_PLATFORM_UBOOT_IMG,
+		&pcr_uboot_measured_data);
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_PCD,
+		PCR_TCG_EVENT_TYPE_PCD_DATA);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_PCD,
+		&pcr_pcd_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_PCD_ID,
+		PCR_TCG_EVENT_TYPE_PCD_ID);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_PCD_ID,
+		&pcr_pcd_id_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_PCD_PLATFORM_ID,
+		PCR_TCG_EVENT_TYPE_PCD_PLATFORM_ID);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_PCD_PLATFORM_ID,
+		&pcr_pcd_platform_id_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_CFM,
+		PCR_TCG_EVENT_TYPE_CFM_DATA);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_CFM,
+		&pcr_cfm_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_CFM_VALID,
+		PCR_TCG_EVENT_TYPE_CFM_INITIALIZATION_STATUS);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_CFM_ID,
+		PCR_TCG_EVENT_TYPE_CFM_ID);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_CFM_ID,
+		&pcr_cfm_id_measured_data);
+
+	pcr_store_update_event_type (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_CFM_PLATFORM_ID,
+		PCR_TCG_EVENT_TYPE_CFM_PLATFORM_ID);
+	pcr_store_set_measurement_data (&pcr_storage, PCR_MEASUREMENT_TYPE_CONFIG_CFM_PLATFORM_ID,
+		&pcr_cfm_platform_id_measured_data);
+#endif
+
+	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
+		PCR_MEASUREMENT_TYPE_PLATFORM_BOOT_IMG, pcr_boot_image_measured_data.data.memory.buffer,
+		pcr_boot_image_measured_data.data.memory.length, true, 0);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_BOOT_IMG, status);
+	}
+
+	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
+		PCR_MEASUREMENT_TYPE_PLATFORM_APP_IMG, pcr_app_image_measured_data.data.memory.buffer,
+		pcr_app_image_measured_data.data.memory.length, true, 0);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_APP_IMG, status);
+	}
+
+	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
+		PCR_MEASUREMENT_TYPE_PLATFORM_FW_VERSION, pcr_fw_version_measured_data.data.memory.buffer,
+		pcr_fw_version_measured_data.data.memory.length, true, 0);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_FW_VERSION, status);
+	}
+
+	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
+		PCR_MEASUREMENT_TYPE_PLATFORM_KMT_IMG, pcr_tip_kmt_measured_data.data.memory.buffer,
+		pcr_tip_kmt_measured_data.data.memory.length, true, 0);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_KMT_IMG, status);
+	}
+
+	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
+		PCR_MEASUREMENT_TYPE_PLATFORM_SKMT_IMG, pcr_tip_skmt_measured_data.data.memory.buffer,
+		pcr_tip_skmt_measured_data.data.memory.length, true, 0);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_SKMT_IMG, status);
+	}
+
+	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
+		PCR_MEASUREMENT_TYPE_PLATFORM_BB_IMG, pcr_bb_measured_data.data.memory.buffer,
+		pcr_bb_measured_data.data.memory.length, true, 0);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_BB_IMG, status);
+	}
+
+	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
+		PCR_MEASUREMENT_TYPE_PLATFORM_BL31_IMG, pcr_bl31_measured_data.data.memory.buffer,
+		pcr_bl31_measured_data.data.memory.length, true, 0);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_BL31_IMG, status);
+	}
+
+	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
+		PCR_MEASUREMENT_TYPE_PLATFORM_OPTEE_IMG, pcr_optee_measured_data.data.memory.buffer,
+		pcr_optee_measured_data.data.memory.length, true, 0);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_OPTEE_IMG, status);
+	}
+
+	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
+		PCR_MEASUREMENT_TYPE_PLATFORM_UBOOT_IMG, pcr_uboot_measured_data.data.memory.buffer,
+		pcr_uboot_measured_data.data.memory.length, true, 0);
+	if (status != 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
+			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_UBOOT_IMG, status);
+	}
+
+	return 0;
+}
+
+/**
+ * Initialize the running application context.
+ *
+ * @return 0 if the context was successfully initialized or an error code.
+ */
+static int initialize_app_context ()
+{
+	int status;
+
+	status = tip_app_context_init (&running_state);
+	if (status != 0) {
+		return status;
+	}
+
+	if ((reset_source & RESET_PORST) == 0) {
+		/* Use abstract API for now as nothing to be restored. */
+		status = tip_app_context_restore (&running_state.base);
+		if (status != 0) {
+			return status;
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * Initialize main system management.
+ *
+ * @return 0 if all components were initialized successfully or an error code.
+ */
+static int initialize_system_management ()
+{
+	int status;
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	status = system_state_manager_init (&system_state, &main_flash->base,
+		SYSTEM_STATE_ADDR (manifest_end_flash_addr));
+	if (status != 0) {
+		return status;
+	}
+	platform_printf (KGRN "TIP system at flash0 %#010lx" NEWLINE KNRM,
+		SYSTEM_STATE_ADDR (manifest_end_flash_addr));
+#endif
+
+	status = tip_cmd_device_init (&tip_cmd_device);
+	if (status != 0) {
+		return status;
+	}
+
+	status = system_init (&tip_system, &tip_cmd_device.base);
+	if (status != 0) {
+		return status;
+	}
+
+	return 0;
+}
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+/**
+ * Initialize management of platform manifest.
+ *
+ * @return 0 if platform manifest management was successfully initialized or an error code.
+ */
+static int initialize_pcd_management ()
+{
+	struct pcd *active_pcd;
+	int status;
+
+	status = pcd_flash_init (&pcd_region1, &main_flash->base, &shared_hash.base,
+		PCD_REGION1_ADDR (manifest_end_flash_addr), pcd_region1_signature,
+		sizeof (pcd_region1_signature), pcd_region1_platform_id, sizeof (pcd_region1_platform_id));
+	if (status != 0) {
+		return status;
+	}
+
+	status = pcd_flash_init (&pcd_region2, &main_flash->base, &shared_hash.base,
+		PCD_REGION2_ADDR (manifest_end_flash_addr), pcd_region2_signature,
+		sizeof (pcd_region2_signature), pcd_region2_platform_id, sizeof (pcd_region2_platform_id));
+	if (status != 0) {
+		return status;
+	}
+
+	status = signature_verification_ecc_init (&pcd_ecc_verify, &pcd_ecc_verify_context,
+		&shared_ecc.base, NULL, 0);
+	if (status != 0) {
+		return status;
+	}
+
+	status = manifest_verification_init (&pcd_verification, &pcd_verification_context,
+		&shared_hash.base, &pcd_ecc_verify.base, (uint8_t*) &manifest_root_key,
+		sizeof (manifest_root_key), &default_manifest_key, &main_keystore.base,
+		PCD_VERIFICATION_KEY);
+	if (status != 0) {
+		return status;
+	}
+
+	status = pcd_manager_flash_init (&platform_manifest, &pcd_region1, &pcd_region2, &system_state,
+		&shared_hash.base, &pcd_verification.base_verify);
+	if (status != 0) {
+		return status;
+	}
+
+	status = pcd_manager_add_observer (&platform_manifest.base,
+		manifest_verification_get_pcd_observer (&pcd_verification));
+	if (status != 0) {
+		return status;
+	}
+
+	status = firmware_update_add_observer (&fw_updater[0], &pcd_verification.base_update);
+	if (status != 0) {
+		return status;
+	}
+
+	status = pcd_observer_pcr_init (&pcr_pcd, &shared_hash.base, &pcr_storage,
+		PCR_MEASUREMENT_TYPE_CONFIG_PCD, PCR_MEASUREMENT_TYPE_CONFIG_PCD_ID,
+		PCR_MEASUREMENT_TYPE_CONFIG_PCD_PLATFORM_ID);
+	if (status != 0) {
+		return status;
+	}
+
+	status = pcd_manager_add_observer (&platform_manifest.base, &pcr_pcd.base);
+	if (status != 0) {
+		return status;
+	}
+
+	active_pcd = platform_manifest.base.get_active_pcd (&platform_manifest.base);
+	platform_printf (KGRN "PCD: active=0x%p (%#010lx,%#010lx)" NEWLINE KNRM, active_pcd,
+		PCD_REGION1_ADDR (manifest_end_flash_addr), PCD_REGION2_ADDR (manifest_end_flash_addr));
+
+	has_active_pcd = (active_pcd != NULL);
+	pcd_has_components = false;
+
+	platform_manifest.base.free_pcd (&platform_manifest.base, active_pcd);
+
+	status = manifest_cmd_handler_pcd_init (&pcd_handler, &pcd_handler_context,
+		&platform_manifest.base.base, &cmd_task.base);
+	if (status != 0) {
+		return status;
+	}
+
+	pcd_observer_pcr_record_measurement (&pcr_pcd, &platform_manifest.base);
+
+	return 0;
+}
+
+/**
+ * Initialize management of downstream components.
+ *
+ * @return 0 if component management was successfully initialized or an error code.
+ */
+static int initialize_component_management ()
+{
+	struct cfm *active;
+	struct cfm *pending;
+
+	int status;
+
+	status = cfm_flash_init (&cfm_region1, &main_flash->base, &shared_hash.base,
+		CFM_REGION1_ADDR (manifest_end_flash_addr), cfm_region1_signature,
+		sizeof (cfm_region1_signature), cfm_region1_platform_id, sizeof (cfm_region1_platform_id));
+	if (status != 0) {
+		return status;
+	}
+
+	status = cfm_flash_init (&cfm_region2, &main_flash->base, &shared_hash.base,
+		CFM_REGION2_ADDR (manifest_end_flash_addr), cfm_region2_signature,
+		sizeof (cfm_region2_signature), cfm_region2_platform_id, sizeof (cfm_region2_platform_id));
+	if (status != 0) {
+		return status;
+	}
+
+	status = signature_verification_ecc_init (&cfm_ecc_verify, &cfm_ecc_verify_context,
+		&shared_ecc.base, NULL, 0);
+	if (status != 0) {
+		return status;
+	}
+
+	status = manifest_verification_init (&cfm_verification, &cfm_verification_context,
+		&shared_hash.base, &cfm_ecc_verify.base, (uint8_t *) &manifest_root_key,
+		manifest_root_key.length, &default_manifest_key, &main_keystore.base, CFM_VERIFICATION_KEY);
+	if (status != 0) {
+		return status;
+	}
+
+	status = cfm_manager_flash_init (&component_manifest, &cfm_region1, &cfm_region2, &system_state,
+		&shared_hash.base, &cfm_verification.base_verify);
+	if (status != 0) {
+		return status;
+	}
+
+	status = cfm_manager_add_observer (&component_manifest.base,
+		manifest_verification_get_cfm_observer (&cfm_verification));
+	if (status != 0) {
+		return status;
+	}
+
+	status = firmware_update_add_observer (&fw_updater[0], &cfm_verification.base_update);
+	if (status != 0) {
+		return status;
+	}
+
+	status = cfm_observer_pcr_init (&pcr_cfm, &shared_hash.base, &pcr_storage,
+		PCR_MEASUREMENT_TYPE_CONFIG_CFM, PCR_MEASUREMENT_TYPE_CONFIG_CFM_ID,
+		PCR_MEASUREMENT_TYPE_CONFIG_CFM_PLATFORM_ID);
+	if (status != 0) {
+		return status;
+	}
+
+	status = cfm_manager_add_observer (&component_manifest.base, &pcr_cfm.base);
+	if (status != 0) {
+		return status;
+	}
+
+	active = component_manifest.base.get_active_cfm (&component_manifest.base);
+	pending = component_manifest.base.get_pending_cfm (&component_manifest.base);
+	platform_printf (KGRN "CFM: active=0x%p, pending=0x%p (%#010lx,%#010lx)" NEWLINE KNRM, active,
+		pending, CFM_REGION1_ADDR (manifest_end_flash_addr),
+		CFM_REGION2_ADDR (manifest_end_flash_addr));
+
+	component_manifest.base.free_cfm (&component_manifest.base, active);
+	component_manifest.base.free_cfm (&component_manifest.base, pending);
+
+	status = manifest_cmd_handler_cfm_init (&cfm_handler, &cfm_handler_context,
+		&component_manifest.base.base, &cmd_task.base);
+	if (status != 0) {
+		return status;
+	}
+
+	cfm_observer_pcr_record_measurement (&pcr_cfm, &component_manifest.base);
+
+	return 0;
+}
+#endif
+
+int protect_recovery_flash (void)
+{
+	uint32_t start[1];
+	uint32_t stop[1];
+
+	start[0] = recovery_flash_start_offset;
+	stop[0] = recovery_flash_start_offset + ROT_IMAGE_MAX_SIZE;
+
+	return tip_flash_protect_region (recovery_flash, start, stop, 1);
+}
+
+/**
+ * Task that will run system initialization.
+ *
+ * @param unused Unused.
+ */
+static void cerberus_init (void *unused)
+{
+	int status;
+	int error_msg = -1;
+	int tip_wd_delay = WD_PERIOD_SEC;
+	uint32_t fiu, cs, spi, offset;
+	uint32_t combo0_size;
+	uint32_t bmc_combo1_flash_addr;
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	const struct key_manifest_public_key *key;
+#endif
+
+
+	/* initialize WD periodic handling*/
+	status = tip_watchdog_service_start (&tip_wd_task, tip_wd_delay,
+		configMINIMAL_STACK_SIZE);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_WD_TASK;
+		goto reset;
+	}
+
+	/* Initialize core system components. */
+	status = tip_flash_initialize_access (FLASH_MAX_FIU, FLASH_MAX_CS);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_FLASH_ACCESS;
+		goto reset;
+	}
+
+	status = tip_flash_get_layout (FLASH_MAX_FIU, FLASH_MAX_CS, &main_flash, &recovery_flash,
+		&active_flash, &recovery_flash_start_offset);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_FLASH_LAYOUT;
+		goto reset;
+	}
+
+	recovery_boot = tip_check_recovery_boot ();
+
+	/* export recovery_boot value to INTCR2 for BMC visibility */
+	SET_REG_FIELD (INTCR2, INTCR2_WDC, recovery_boot);
+
+	/**
+	 * Init debug log.
+	 * Debug log is 64KB (one flash block).
+	 */
+	status = logging_flash_init (&debug_logger, &debug_log_context, recovery_flash,
+		DEBUG_LOG_FLASH_ADDR (recovery_flash));
+
+	platform_printf (KMAG "Deubg log at recovery flash offset %#010lx" NEWLINE KNRM,
+		DEBUG_LOG_FLASH_ADDR (recovery_flash));
+
+
+	if (status == 0) {
+		debug_log = &debug_logger.base;
+	}
+	else {
+		platform_printf ("Failed to initialize debug logging module: %#010lx" NEWLINE, status);
+	}
+
+	debug_log_flush ();
+
+	debug_log_create_entry ((recovery_boot) ? DEBUG_LOG_SEVERITY_WARNING : DEBUG_LOG_SEVERITY_INFO,
+		DEBUG_LOG_COMPONENT_INIT, INIT_LOGGING_BOOT_SOURCE, recovery_boot, reset_source);
+
+	/* Initialize a staging virtual flash */
+	status = tip_initialize_flash_access_virtual (&virtual_flash, &virtual_flash_context,
+		&virtual_flash_master.base, TIP_VIRTUAL_FLASH_BASE_ADDR, ROT_STAGING_SIZE);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_VIRTUAL_FLASH_ACCESS;
+		goto reset;
+	}
+
+	status = initialize_crypto ();
+	if (status != 0) {
+		error_msg = INIT_LOGGING_SYSTEM_CRYPTO;
+		goto reset;
+	}
+
+	/* No need to load and verify, already done at L0. Hence -1 start offset. */
+	status = tip_firmware_component_init (&skmt_img, active_flash, IMG_SKMT, 0, false);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_FW_COMPONENT;
+		goto reset;
+	}
+
+	/* Initialize SKMT API. */
+	status = tip_skmt_init (&tip_skmt, &skmt_img, MANIFEST_KEY_ADDRESS_COPY);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_TIP_SKMT_INIT;
+		goto reset;
+	}
+
+	status = tip_skmt_parse (&tip_skmt);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_SKMT_PARSE;
+		goto reset;
+	}
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	/* Save the manifest root key. */
+	key = tip_skmt.base.get_manifest_key (&tip_skmt.base);
+
+	memcpy (&manifest_root_key.der, key->key.ecc_der->der, ECC_DER_MAX_PUBLIC_LENGTH);
+	manifest_root_key.length = key->key.ecc_der->length;
+#endif
+
+	status = bmc_task_init (&bmc_reset_task, CERBERUS_PRIORITY_BACKGROUND, 256 * 3 + 128);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_BMC_TASK;
+		goto reset;
+	}
+
+	status = tip_load_bmc_firmware (&bmc_reset_task, active_flash,
+		recovery_boot ? recovery_flash_start_offset + ROT_COMBO1_ADDR_DEFAULT :
+		ROT_COMBO1_ADDR_DEFAULT, &shared_hash.base, reset_source, &bmc_combo1_flash_addr);
+
+	if (ROT_IS_ERROR (status)) {
+		error_msg = INIT_LOGGING_A35_INIT;
+		goto reset;
+	}
+
+	if (recovery_boot == true) {
+		bmc_combo1_flash_addr = bmc_combo1_flash_addr - recovery_flash_start_offset;
+	}
+
+	status = tip_flash_phys_to_logical (bmc_combo1_flash_addr, &fiu, &cs, &spi, &offset);
+	if (status < 0) {
+		error_msg = INIT_LOGGING_A35_INIT;
+		goto reset;
+	}
+
+	combo0_size = bmc_combo1_flash_addr - tip_flash_get_base (spi);
+
+	/* check if there is room for manifests between L1 and bootblock */
+	if (combo0_size >= _1MB_) {
+		manifest_end_flash_addr = combo0_size;
+	}
+	/* if not: put the manifests at the end of the flash */
+	else {
+		manifest_end_flash_addr = main_flash->state->device_size;
+	}
+
+	platform_printf (KMAG
+		"manifests at [%#010lx-%#010lx], combo 0 size %#010lx, spi %d" KNRM NEWLINE,
+		manifest_end_flash_addr - 0xC0000, manifest_end_flash_addr, combo0_size, spi);
+
+	status = verify_stored_pcr_hash (&shared_hash.base);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_PCR_VERIFY;
+		goto reset;
+	}
+
+	status = initialize_riot_manager ();
+	if (status != 0) {
+		error_msg = INIT_LOGGING_RIOT_MANAGER;
+		goto reset;
+	}
+
+	status = initialize_cerberus_attestation (&shared_hash.base);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_PCR_STORE;
+		goto reset;
+	}
+
+	/* Nuvoton BMC specific workflow */
+	bmc_export_data ();
+
+	status = initialize_app_context ();
+	if (status != 0) {
+		error_msg = INIT_LOGGING_RESTORE_CONTEXT;
+		goto reset;
+	}
+
+	status = initialize_system_management ();
+	if (status != 0) {
+		error_msg = INIT_LOGGING_SYSTEM_STATE;
+		goto reset;
+	}
+
+	status = initialize_firmware_updater (combo0_size);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_FW_UPDATER;
+		goto reset;
+	}
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	status = initialize_pcd_management ();
+	if (status != 0) {
+		error_msg = INIT_LOGGING_PCD_MANAGEMENT;
+		goto reset;
+	}
+
+	status = initialize_component_management ();
+	if (status != 0) {
+		error_msg = INIT_LOGGING_CFM_MANAGEMENT;
+		goto reset;
+	}
+#endif
+
+#ifdef CMD_ENABLE_RESET_CONFIG
+	status = initialize_config_reset_management (false);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_CONFIG_MGMT;
+		goto reset;
+	}
+#endif
+
+#ifdef CMD_SUPPORT_ENCRYPTED_SESSIONS
+	status = initialize_session_management ();
+	if (status != 0) {
+		error_msg = INIT_LOGGING_SESSION_MANAGEMENT;
+		goto reset;
+	}
+#endif
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	size_t num_cmd_task_handler = 0;
+	cmd_task_handler[num_cmd_task_handler++] = &cfm_handler.base.base_event;
+	cmd_task_handler[num_cmd_task_handler++] = &pcd_handler.base.base_event;
+
+	status = event_task_freertos_init (&cmd_task, &cmd_task_context, &tip_system,
+		(const struct event_task_handler**) &cmd_task_handler, num_cmd_task_handler);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_INIT_CONFIG_CMD_TASK;
+		goto reset;
+	}
+#endif
+
+	status = init_cmd_interface ();
+	if (status != 0) {
+		error_msg = INIT_LOGGING_COMMAND_HANDLER;
+		goto reset;
+	}
+
+#ifdef CERBERUS_ENABLE_COMPONENT_ATTESTATION
+	status = flush_data_background_init (&flush_data, debug_log, &system_state,
+		CERBERUS_PRIORITY_BACKGROUND);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_LOG_TASK;
+		goto reset;
+	}
+
+	status = event_task_freertos_start (&cmd_task, 6 * 256, "config_cmd", CERBERUS_PRIORITY_NORMAL);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_CONFIG_CMD_TASK;
+		goto reset;
+	}
+#endif
+
+	status = tip_fw_update_task_start (&cerberus_update, 6 * 256, recovery_boot);
+	if (status != 0) {
+		error_msg = INIT_LOGGING_FW_UPDATE_TASK;
+		goto reset;
+	}
+
+	/* Workaround: Wait until fw update task finishes loading recovery image or
+	   restoring active image to avoid failure while uboot reads env variable from the same flash.
+	   Will remove when flash sharing enhancement is done. */
+	while (cerberus_update.running != 0) {
+		platform_msleep (0);
+	}
+
+	status = start_cmd_interface ();
+	if (status != 0) {
+		goto reset;
+	}
+
+	/* Set next reboot addr, depending on whether recovery image is golden
+	 * or last-known-good image
+	 */
+#ifndef FORCE_RECOVERY_IMAGE_MATCH_ACTIVE
+	if (recovery_boot == true) {
+		/* for golden recovery: stay in recovrey until next PORST */
+		tip_select_next_boot_image (tip_flash_get_recovery_phys_addr());
+	}
+	else {
+		/* main image boot: reload main image again on the next reset */
+		tip_select_next_boot_image (SPI0CS0_BASE_ADDR);
+	}
+#else
+	/* if main == recovery image, return to main image on the next reset */
+	tip_select_next_boot_image (SPI0CS0_BASE_ADDR);
+#endif
+
+	/* recovery image is ready, lock any changes to recovery image until next CORST */
+	status = protect_recovery_flash ();
+	if (status) {
+		error_msg = INIT_LOGGING_FLASH_LOCK;
+		goto reset;
+	}
+
+	bmc_continue ();
+	tip_version_set_in_OTP (tip_version);
+
+	status = tip_invalidate_otp_keys ();
+	if (status != 0) {
+		error_msg = INIT_LOGGING_OTP_KEY_REVOCATION;
+		goto reset;
+	}
+
+	vTaskDelete (NULL);
+
+reset:
+	if (error_msg >= 0) {
+		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT, error_msg,
+			status, 0);
+		platform_printf ("System initialization failed: msg=%d, status=%#010lx" NEWLINE, error_msg,
+			status);
+	}
+	else {
+		platform_printf ("System initialization failed: status=%#010lx" NEWLINE, status);
+	}
+
+	debug_log_flush ();
+
+	/* Never halt the system. Reboot and try again. */
+	platform_printf (NEWLINE);
+	platform_reset (0);
+}
+
+/**
+ * Cerberus entry point.
+ */
+int main (void)
+{
+	int status;
+
+	hardware_app_init ();
+
+	memcpy (version, version_L1, CERBERUS_PROTOCOL_FW_VERSION_LEN);
+
+	platform_printf (KMAG NEWLINE ">================================================" NEWLINE);
+	platform_printf (">  Arbel TIP FW L1 Version %s" NEWLINE, version);
+	platform_printf (">================================================" NEWLINE);
+	platform_printf ("Compile time: %s %s " NEWLINE KNRM, __DATE__, __TIME__, NEWLINE);
+
+	reset_source = tip_get_reset_indication ();
+	tip_update_reset_indication (true);
+
+	status = xTaskCreate (cerberus_init, "Init", 5 * 256, NULL, CERBERUS_PRIORITY_BACKGROUND, NULL);
+	if (status == pdPASS) {
+		vTaskStartScheduler ();
+		platform_printf ("Returned from FreeRTOS scheduler!?" NEWLINE);
+	}
+	else {
+		platform_printf ("Failed to create init task (%d)!" NEWLINE, status);
+		goto reset;
+	}
+
+reset:
+	/* Never halt the system.  Reboot and try again. */
+	platform_printf (NEWLINE);
+	platform_reset (0);
+}

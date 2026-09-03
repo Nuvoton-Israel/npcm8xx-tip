@@ -44,7 +44,7 @@ This project is the Cerberus porting to Nuvoton TIP.
 	```bash
 	mkdir build_boot
 	cd build_boot
-	cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -B . -S ../projects/nuvoton/tip/npcm850/L0
+	cmake -G Ninja -B . -S ../projects/nuvoton/tip/npcm850/L0
 	ninja
 	```
 - Build L1:
@@ -52,7 +52,7 @@ This project is the Cerberus porting to Nuvoton TIP.
 	```bash
 	mkdir build_cerberus
 	cd build_cerberus
-	cmake -G Ninja -DCMAKE_BUILD_TYPE=Debug -B . -S ../projects/nuvoton/tip/npcm850/L1
+	cmake -G Ninja -B . -S ../projects/nuvoton/tip/npcm850/L1
 	ninja
 	```
 Once build is successful, *.bin, *.map. *.elf are generated in folder build_boot and build_cerberus.

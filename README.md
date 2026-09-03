@@ -28,14 +28,14 @@ This project is the Cerberus porting to Nuvoton TIP.
 	```bash
 	mkdir NuvotonCerberus
 	cd NuvotonCerberus
-	repo init -u https://NuvotonCerberus@dev.azure.com/NuvotonCerberus/Arbel/_git/Cerberus-on-TIP-manifest -b master
+	repo init -u https://github.com/Nuvoton-Israel/npcm8xx-tip-fw-manifest.git -b master
 	repo sync
 	```
 - Download the source using SSH:
 	```bash
 	mkdir NuvotonCerberus
 	cd NuvotonCerberus
-	repo init -u git@ssh.dev.azure.com:v3/NuvotonCerberus/Arbel/Cerberus-on-TIP-manifest -m default-ssh.xml -b master
+	repo init -u git@github.com:Nuvoton-Israel/npcm8xx-tip-fw-manifest.git -m default-ssh.xml -b master
 	repo sync
 	```
 3. Build TIP FW

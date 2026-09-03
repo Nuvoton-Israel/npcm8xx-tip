@@ -1,6 +1,10 @@
 # Introduction
 This project is the Cerberus porting to Nuvoton TIP.
 
+## Important Note
+This repo is NOT compile-able by itself.
+to get the full sources follow the instructions below.
+
 # TIP firmware local build instructions
 1. Set up build environment under WSL2 Ubuntu or Linux
 - Install cmake version 3.16.3

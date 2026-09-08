@@ -21,11 +21,7 @@
 #include "tip_ncl_rom_if.h"
 #include "crypto/hash.h"
 #include "npcm850_scratchpads.h"
-
-#define SEC_DME_NONCE_LENGTH        SHA512_HASH_LENGTH
-#define SEC_DME_CHALLENGE_LENGTH    SHA512_HASH_LENGTH
-#define SEC_PCR0_LENGTH             SHA512_HASH_LENGTH
-#define SEC_PUB_KEY_SIZE            (2 * ECC_KEY_SIZE_DWORD_384 * sizeof(uint32_t))
+#include "tip_rom_dme_handoff.h"
 
 #define WD_WDIV_L0                  4
 #define WD_PRESET_L0                10
@@ -225,83 +221,6 @@ typedef struct {
  	RESET_STS_TABLE_T   reset_log;
 } BOOT_LOG_TABLE_T;
 #pragma pack(pop)
-
-/**
- * SEC PCR structure (From ROM)
- */
-#pragma pack(push, 1)
-typedef struct {				/* offset */
-	uint16_t tip_dbg_ctl;		/* 0      */
-	uint16_t tip_mem_ctl;		/* 2      */
-	uint16_t tip_pqa_ctl;		/* 4      */
-	uint16_t tip_sec_boot;		/* 6      */
-	uint32_t fustrap1;			/* 8      */
-	uint32_t fustrap2;			/* 12     */
-	uint32_t tip_fcfg[8];		/* 16     */
-	uint32_t bmc_fcfg[8];		/* 48     */
-	uint8_t otp_life_cycle; 	/* 80     */
-	uint8_t uds_valid[3];		/* 81     */
-	uint8_t uds_version[3]; 	/* 84     */
-	uint8_t padding[1];			/* 87     */
-} SEC_PRE_PCR0_T;
-#pragma pack(pop)
-
-/**
- * SEC DME DICE structure (from A1 TIP ROM)
- */
-#pragma pack(push, 1)
-typedef struct SEC_DME_DICE_A1_tag {
-	uint8_t dme_pub_key[SEC_PUB_KEY_SIZE];
-	uint8_t dme_signature[SEC_PUB_KEY_SIZE];
-	uint8_t dme_hash[SHA512_HASH_LENGTH];
-	uint8_t dme_nonce[SEC_DME_NONCE_LENGTH];
-	uint8_t dme_pcr0[SEC_PCR0_LENGTH];
-	uint8_t dice_pcr0[SEC_PCR0_LENGTH];
-	SEC_PRE_PCR0_T dme_pre_pcr0;
-	SEC_PRE_PCR0_T dice_pre_pcr0;
-	uint8_t cdi[SHA512_HASH_LENGTH];
-	uint8_t dice_pub_key[SEC_PUB_KEY_SIZE];
-} SEC_DME_DICE_T_A1;
-#pragma pack(pop)
-
-/**
- * SEC DME DICE structure (from A2 TIP ROM)
- */
-#pragma pack(1)
-typedef struct {
-	uint8_t dme_pub_key[SEC_PUB_KEY_SIZE];
-	uint8_t dme_signature[SEC_PUB_KEY_SIZE];
-	uint8_t dme_hash[SHA512_HASH_LENGTH];
-	uint8_t dme_nonce[SEC_DME_NONCE_LENGTH];
-	uint8_t dme_challenge[SEC_DME_CHALLENGE_LENGTH];
-	uint8_t dme_pcr0[SEC_PCR0_LENGTH];
-	uint8_t dice_pcr0[SEC_PCR0_LENGTH];
-	SEC_PRE_PCR0_T dme_pre_pcr0;
-	SEC_PRE_PCR0_T dice_pre_pcr0;
-	uint8_t cdi[SHA512_HASH_LENGTH];
-	uint8_t dice_pub_key[SEC_PUB_KEY_SIZE];
-} SEC_DME_DICE_T_A2;
-#pragma pack()
-
-#pragma pack(push,1)
-typedef union {
-	SEC_DME_DICE_T_A1 *a1;
-	SEC_DME_DICE_T_A2 *a2;
-} SEC_DME_DICE_T_PTR;
-#pragma pack()
-
-/**
- * TIP DME structure format (Type 7) to be carried into DME extension.
- */
-#pragma pack(1)
-struct tip_dme_struct_data_a2 {
-	uint8_t dme_nonce[SEC_DME_NONCE_LENGTH];
-	uint8_t dme_challenge[SEC_DME_CHALLENGE_LENGTH];
-	uint8_t dice_pub_key[SEC_PUB_KEY_SIZE];
-	uint8_t dme_pcr0[SEC_PCR0_LENGTH];
-};
-#pragma pack()
-
 
 /**
  * buffer that holds the data to print the log into the memory

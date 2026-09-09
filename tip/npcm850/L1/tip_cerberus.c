@@ -82,6 +82,10 @@
 #include "tip_skmt.h"
 #include "tip_utils.h"
 #include "tip_version.h"
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+#include "composite_eat/tip_main_token_generator.h"
+#include "composite_eat/tip_evidence_adapter.h"
+#endif
 #include "tip_virtual_flash.h"
 #include "twd_task.h"
 #include "tip_reset.h"
@@ -579,6 +583,20 @@ static struct device_manager device_manager;
  *  Platform and host PCR storage.
  */
 static struct pcr_store pcr_storage;
+
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+static const uint8_t composite_eat_class_id[] = "npcm850-tip";
+static const uint8_t composite_eat_vendor[] = "Nuvoton";
+static const uint8_t composite_eat_model[] = "NPCM850 TIP";
+static const uint8_t composite_eat_dme_class_id[] = "npcm850-rom-dme";
+static const uint8_t composite_eat_dme_model[] = "NPCM850 ROM DME";
+static const uint8_t composite_eat_profile[] =
+	"https://datatracker.ietf.org/doc/draft-sun-rats-composite-eat/";
+
+static struct composite_eat_tip_evidence_adapter composite_eat_evidence_adapter;
+static struct composite_eat_tip_main_token_generator composite_eat_main_token_generator;
+static struct composite_eat_tip_main_token_workspace composite_eat_main_token_workspace;
+#endif
 
 #ifdef CMD_SUPPORT_ENCRYPTED_SESSIONS
 /**
@@ -2721,6 +2739,60 @@ static void cerberus_init (void *unused)
 		error_msg = INIT_LOGGING_PCR_STORE;
 		goto reset;
 	}
+
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+	{
+		const struct tcg_concise_evidence_environment environment = {
+			.has_class = true,
+			.class_info = {
+				.has_class_id = true,
+				.class_id = {TCG_CONCISE_EVIDENCE_TAGGED_BYTES,
+					{composite_eat_class_id, sizeof (composite_eat_class_id) - 1}},
+				.has_vendor = true,
+				.vendor = {composite_eat_vendor, sizeof (composite_eat_vendor) - 1},
+				.has_model = true,
+				.model = {composite_eat_model, sizeof (composite_eat_model) - 1},
+			},
+		};
+		const struct tcg_concise_evidence_environment dme_environment = {
+			.has_class = true,
+			.class_info = {
+				.has_class_id = true,
+				.class_id = {TCG_CONCISE_EVIDENCE_TAGGED_BYTES,
+					{composite_eat_dme_class_id, sizeof (composite_eat_dme_class_id) - 1}},
+				.has_vendor = true,
+				.vendor = {composite_eat_vendor, sizeof (composite_eat_vendor) - 1},
+				.has_model = true,
+				.model = {composite_eat_dme_model, sizeof (composite_eat_dme_model) - 1},
+			},
+		};
+		const struct composite_eat_buffer profile = {
+			.data = composite_eat_profile,
+			.length = sizeof (composite_eat_profile) - 1,
+		};
+
+		status = composite_eat_tip_evidence_adapter_init (&composite_eat_evidence_adapter,
+			&pcr_storage, &shared_hash.base, &environment);
+		if (status != COMPOSITE_EAT_TIP_EVIDENCE_OK) {
+			error_msg = INIT_LOGGING_PCR_STORE;
+			goto reset;
+		}
+		status = composite_eat_tip_evidence_enable_dme (&composite_eat_evidence_adapter,
+			&dme_environment);
+		if (status != COMPOSITE_EAT_TIP_EVIDENCE_OK) {
+			error_msg = INIT_LOGGING_PCR_STORE;
+			goto reset;
+		}
+		status = composite_eat_tip_main_token_generator_init (
+			&composite_eat_main_token_generator, &shared_ecc.base, &shared_hash.base, &riot,
+			&composite_eat_evidence_adapter, &profile, &composite_eat_main_token_workspace);
+		if (status != COMPOSITE_EAT_TIP_MAIN_TOKEN_OK) {
+			error_msg = INIT_LOGGING_PCR_STORE;
+			goto reset;
+		}
+		bmc_direct_composite_eat_configure (&composite_eat_main_token_generator);
+	}
+#endif
 
 	/* Nuvoton BMC specific workflow */
 	bmc_export_data ();

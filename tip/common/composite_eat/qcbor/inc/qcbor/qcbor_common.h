@@ -74,7 +74,7 @@ extern "C" {
 #define QCBOR_VERSION_BANNER "libqcbor " QCBOR_VERSION_STRING
 
 /** One number for simple scalar version comparison */
-#define QCBOR_VERSION_NUMBER  QCBOR_VERSION_MAJOR * 10000 +\
+#define QCBOR_VERSION_NUMBER  (QCBOR_VERSION_MAJOR * 10000 +\
                               QCBOR_VERSION_MINOR * 100 + \
                               QCBOR_VERSION_PATCH)
 

@@ -72,7 +72,8 @@ static int composite_eat_main_token_buffer_write (void *context, const uint8_t *
 {
 	struct composite_eat_main_token_buffer_writer *writer = context;
 
-	if ((writer == NULL) || (data == NULL) || ((writer->capacity - writer->offset) < length)) {
+	if ((writer == NULL) || (data == NULL) || (writer->offset > writer->capacity) ||
+		((writer->capacity - writer->offset) < length)) {
 		return -1;
 	}
 

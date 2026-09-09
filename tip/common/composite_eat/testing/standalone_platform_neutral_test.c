@@ -9,6 +9,7 @@
 #include "composite_eat/main_token_builder.h"
 #include "composite_eat/profile_evidence.h"
 #include "composite_eat/tcg_concise_evidence.h"
+#include "qcbor/qcbor_common.h"
 
 
 #define CHECK(condition) \
@@ -411,6 +412,7 @@ static int test_opaque_local_evidence (void)
 
 int main (void)
 {
+	CHECK (QCBOR_VERSION_NUMBER == 10602);
 	CHECK (test_legacy_vector () == 0);
 	CHECK (test_generic_document () == 0);
 	CHECK (test_generic_identifier_and_algorithm_forms () == 0);

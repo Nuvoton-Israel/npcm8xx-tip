@@ -10,7 +10,7 @@
 - Commit: `ab7881d04584bf935b564d4b64fb3624719b3bc2`
 - License: BSD-3-Clause
 
-The files under `qcbor/` are an unmodified subset of the upstream commit:
+The files under `qcbor/` are a subset of the upstream commit:
 
 - `LICENSE`
 - `inc/qcbor/UsefulBuf.h`
@@ -23,5 +23,9 @@ The files under `qcbor/` are an unmodified subset of the upstream commit:
 - `src/ieee754.h`
 - `src/qcbor_decode.c`
 - `src/qcbor_encode.c`
+
+`inc/qcbor/qcbor_common.h` contains one local correctness patch that adds the
+missing opening parenthesis to `QCBOR_VERSION_NUMBER`. The upstream 1.6.2 macro
+has an unmatched closing parenthesis and fails when expanded.
 
 QCBOR is compiled without floating-point support for the TIP firmware and host tests.

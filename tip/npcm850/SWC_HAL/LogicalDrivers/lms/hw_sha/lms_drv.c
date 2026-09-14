@@ -88,7 +88,7 @@ extern ROM_NCL_SHA_Power		   pROM_NCL_SHA_Power;
 /*---------------------------------------------------------------------------------------------------------*/
 DEFS_STATUS LMS_Power (BOOLEAN on)
 {
-    DEFS_STATUS_RET_CHECK((DEFS_STATUS)pROM_NCL_SHA_Power(NULL, on));
+    DEFS_STATUS_RET_CHECK((pROM_NCL_SHA_Power(NULL, on) == NCL_STATUS_OK) ? DEFS_STATUS_OK : DEFS_STATUS_FAIL);
 
     return DEFS_STATUS_OK;
 }

@@ -43,6 +43,11 @@ to get the full sources follow the instructions below.
 	repo sync
 	```
 3. Build TIP FW
+
+Run build_tip_fw.sh
+(note: this script is copied to root folder when doing repo init)
+
+alternatively, use can compile only L0 or L1:
 - Build L0:
 	Create build folder under source root.
 	```bash

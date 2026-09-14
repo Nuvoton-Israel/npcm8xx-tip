@@ -1,0 +1,56 @@
+name: Build TIP FW
+
+on:
+  push:
+    branches: [ master, main_nuvoton ]
+  pull_request:
+    branches: [ master, main_nuvoton ]
+  workflow_dispatch:
+
+env:
+  CERBERUS_ROOT: ${{ github.workspace }}/cerberus
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install ninja-build
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Checkout Project-Cerberus (Nuvoton fork, core-igps)
+        uses: actions/checkout@v4
+        with:
+          repository: Nuvoton-Israel/npcm8xx-tip-fw-project-cerberus
+          ref: core-igps
+          path: cerberus
+
+      - name: Checkout npcm8xx-tip (this repo)
+        uses: actions/checkout@v4
+        with:
+          path: cerberus/projects/nuvoton
+
+      - name: Checkout mbedtls
+        uses: actions/checkout@v4
+        with:
+          repository: ARMmbed/mbedtls
+          ref: 5e146adef63b326b04282252639bebc2730939c6
+          path: cerberus/external/mbedtls
+
+      - name: Build TIP FW (L0 + L1)
+        working-directory: cerberus/projects/nuvoton/tip
+        run: |
+          chmod +x build_tip_image.sh
+          ./build_tip_image.sh
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tip_fw_build
+          path: |
+            cerberus/projects/nuvoton/tip/build_L0/arbel_tip_fw_L0.bin
+            cerberus/projects/nuvoton/tip/build_L0/arbel_tip_fw_L0.map
+            cerberus/projects/nuvoton/tip/build_L0/arbel_tip_fw_L0.elf
+            cerberus/projects/nuvoton/tip/build_L1/arbel_tip_fw_L1.bin
+            cerberus/projects/nuvoton/tip/build_L1/arbel_tip_fw_L1.map
+            cerberus/projects/nuvoton/tip/build_L1/arbel_tip_fw_L1.elf
+          if-no-files-found: warn

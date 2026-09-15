@@ -40,17 +40,17 @@ jobs:
         working-directory: cerberus/projects/nuvoton/tip
         run: |
           chmod +x build_tip_image.sh
-          ./build_tip_image.sh
+          ./build_tip_image.sh "${{ github.workspace }}/bld_boot" "${{ github.workspace }}/bld_cerberus"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: tip_fw_build
           path: |
-            cerberus/projects/nuvoton/tip/build_L0/arbel_tip_fw_L0.bin
-            cerberus/projects/nuvoton/tip/build_L0/arbel_tip_fw_L0.map
-            cerberus/projects/nuvoton/tip/build_L0/arbel_tip_fw_L0.elf
-            cerberus/projects/nuvoton/tip/build_L1/arbel_tip_fw_L1.bin
-            cerberus/projects/nuvoton/tip/build_L1/arbel_tip_fw_L1.map
-            cerberus/projects/nuvoton/tip/build_L1/arbel_tip_fw_L1.elf
+            bld_boot/arbel_tip_fw_L0.bin
+            bld_boot/arbel_tip_fw_L0.map
+            bld_boot/arbel_tip_fw_L0.elf
+            bld_cerberus/arbel_tip_fw_L1.bin
+            bld_cerberus/arbel_tip_fw_L1.map
+            bld_cerberus/arbel_tip_fw_L1.elf
           if-no-files-found: warn

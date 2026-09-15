@@ -8,8 +8,8 @@
 
 top=`dirname "$(realpath "$BASH_SOURCE")"`
 tip_dir=$top/npcm850
-build_L0=$top/build_L0
-build_L1=$top/build_L1
+build_L0=${1:-$top/bld_boot}
+build_L1=${2:-$top/bld_cerberus}
 
 #check if the gcc compiler exists on the build machine
 GCC_ARM_COMPILER_BUILD=10
@@ -44,7 +44,7 @@ fi
 mkdir -p $build_L0
 cd $build_L0
 
-cmake -GNinja ../npcm850/L0
+cmake -GNinja $tip_dir/L0
 if [ $? -ne 0 ]; then
 	exit 1
 fi
@@ -63,7 +63,7 @@ fi
 mkdir -p $build_L1
 cd $build_L1
 
-cmake -GNinja ../npcm850/L1
+cmake -GNinja $tip_dir/L1
 if [ $? -ne 0 ]; then
 	exit 1
 fi

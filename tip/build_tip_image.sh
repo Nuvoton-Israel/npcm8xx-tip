@@ -63,7 +63,7 @@ fi
 mkdir -p $build_L1
 cd $build_L1
 
-cmake -GNinja $tip_dir/L1
+cmake -GNinja -DTIP_COMPOSITE_EAT=ON $tip_dir/L1
 if [ $? -ne 0 ]; then
 	exit 1
 fi

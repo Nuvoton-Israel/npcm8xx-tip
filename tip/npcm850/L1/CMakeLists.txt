@@ -34,6 +34,13 @@
 	set(TIP_SRC_DIR ${TIP_DIR}/src)
 	set(TIP_NPCM850_DIR ${TIP_DIR}/npcm850)
 	set(TIP_FREE_RTOS_DIR ${TIP_NPCM850_DIR}/freertos)
+	set(COMPOSITE_EAT_DIR ${TIP_COMMON_DIR}/composite_eat)
+
+	if(DEFINED TIP_COMPOSITE_ATTESTATION)
+		message(FATAL_ERROR
+			"TIP_COMPOSITE_ATTESTATION was renamed to TIP_COMPOSITE_EAT")
+	endif()
+	option(TIP_COMPOSITE_EAT "Enable TIP Composite EAT generation" OFF)
 
 	# This flag is added to avoid build utilizing linker generated dependencies.
 	# This is needed for mitigating this issue:
@@ -177,6 +184,7 @@
 		${TIP_COMMON_DIR}/serial_printf/serial_printf.c
 		${TIP_COMMON_DIR}/tip_version.c
 		${TIP_COMMON_DIR}/tip_utils.c
+		${TIP_COMMON_DIR}/tip_rom_dme_handoff.c
 		${TIP_COMMON_DIR}/tip_init_common.c
 		${TIP_COMMON_DIR}/tip_stack_overflow_check.c
 		${TIP_COMMON_DIR}/tip_rom_ncl_funcs.s
@@ -185,6 +193,40 @@
 		${TIP_NPCM850_DIR}/L1/tip_cerberus.c
 		${GCC_DIR}/platform_compiler.c
 		)
+
+	if(TIP_COMPOSITE_EAT)
+		target_sources(
+			${TARGET_NAME}
+			PRIVATE
+				${COMPOSITE_EAT_DIR}/bmc_direct/bmc_direct_composite_eat_status.c
+				${COMPOSITE_EAT_DIR}/bmc_direct/bmc_direct_composite_eat_transport.c
+				${COMPOSITE_EAT_DIR}/generation_request.c
+				${COMPOSITE_EAT_DIR}/main_token_builder.c
+				${COMPOSITE_EAT_DIR}/profile_evidence.c
+				${COMPOSITE_EAT_DIR}/tcg_concise_evidence.c
+				${COMPOSITE_EAT_DIR}/tip_main_token_generator.c
+				${COMPOSITE_EAT_DIR}/tip_evidence_adapter.c
+				${COMPOSITE_EAT_DIR}/qcbor/src/UsefulBuf.c
+				${COMPOSITE_EAT_DIR}/qcbor/src/qcbor_decode.c
+				${COMPOSITE_EAT_DIR}/qcbor/src/qcbor_encode.c
+			)
+		target_include_directories(
+			${TARGET_NAME}
+			PRIVATE
+				${COMPOSITE_EAT_DIR}/qcbor/inc
+				${COMPOSITE_EAT_DIR}/qcbor/inc/qcbor
+			)
+		target_compile_definitions(
+			${TARGET_NAME}
+			PRIVATE
+				TIP_COMPOSITE_EAT
+				BMC_DIRECT_COMPOSITE_EAT
+				QCBOR_DISABLE_PREFERRED_FLOAT
+				QCBOR_DISABLE_FLOAT_HW_USE
+				USEFULBUF_DISABLE_ALL_FLOAT
+			)
+		target_compile_options(${TARGET_NAME} PRIVATE -fstack-usage)
+	endif()
 	set(DUMMY_OTP_VALUE 0 CACHE STRING "default 0 for DUMMY_OTP_VALUE")
 	target_compile_definitions(${TARGET_NAME} PRIVATE TIP_DUMMY_OTP_ON_RAM=${DUMMY_OTP_VALUE})
 	message(STATUS "TIP DUMMY_OTP_VALUE: ${DUMMY_OTP_VALUE}")
@@ -255,7 +297,7 @@
 			EXTERNAL_INCLUDE_FILE=${TIP_NPCM850_DIR}/L1/hal_cfg_L1.h
 			CMD_ENABLE_DEBUG_LOG
 			ECC_ENABLE_GENERATE_KEY_PAIR
-			ECC_ENABLE_ECDH		
+			ECC_ENABLE_ECDH
 			# optional:
 			LMS_ENABLE
 			X509_ENABLE_AUTHENTICATION
@@ -265,18 +307,18 @@
 			# ATTESTATION_SUPPORT_SPDM
 			# ATTESTATION_SUPPORT_DEVICE_DISCOVERY
 			# CMD_ENABLE_RESET_CONFIG
-	
+
 			HASH_ENABLE_SHA384
 			HASH_ENABLE_SHA512
 			FORCE_RECOVERY_IMAGE_MATCH_ACTIVE
-			
-			# optional: 
+
+			# optional:
 			BMC_DIRECT
 			MBEDTLS_CONFIG_FILE="${TIP_DIR}/common/crypto/tip_mbedtls_config.h"
-			
+
 			# Optional:
 			TIP_SUPPORT_ENCRYPTED_IMAGE
-			
+
 			# Optional:
 			ENABLE_RECOVERY_PROTECTION
 			GPIO_WOL

@@ -1,4 +1,4 @@
-TBD:
+0.8.9 L0 0.7.8 L1
 =================
 - Add TIP Composite EAT support (tip/common/composite_eat/): RoT-neutral protocol machinery and
   feature-gated TIP integration producing a signed Composite EAT main token (CWT/COSE encoding,

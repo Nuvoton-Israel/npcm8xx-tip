@@ -57,7 +57,7 @@ uint8_t fustrap1_lms_enabeld;
 /**
  * Version of RIoT Core. This must be incremented with every change to the bootloader.
  */
-static const char *version = "0.8.8";
+static const char *version = "0.8.9";
 
 /* Stuff from TIP_ROM */
 static BOOT_LOG_TABLE_T BOOT_log_table __attribute__ ((section (".boot_log")));

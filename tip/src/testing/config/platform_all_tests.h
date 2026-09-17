@@ -137,6 +137,14 @@
 void add_all_platform_tests (CuSuite *suite)
 {
 	add_all_linux_tests (suite);
+	TESTING_RUN_SUITE (bmc_direct_composite_eat_status);
+	TESTING_RUN_SUITE (bmc_direct_composite_eat_transport);
+	TESTING_RUN_SUITE (tcg_concise_evidence);
+	TESTING_RUN_SUITE (composite_eat_generation_request);
+	TESTING_RUN_SUITE (composite_eat_main_token_builder);
+	TESTING_RUN_SUITE (composite_eat_tip_main_token_generator);
+	TESTING_RUN_SUITE (composite_eat_tip_evidence_adapter);
+	TESTING_RUN_SUITE (tip_rom_dme_handoff);
 }
 
 

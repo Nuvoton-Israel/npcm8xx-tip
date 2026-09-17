@@ -5,6 +5,8 @@
   TCG DICE Concise Evidence model), including a BMC-direct shared-memory transport
 - Add tip_rom_dme_handoff: DME (Device Measurement Environment) handoff support used by the
   Composite EAT generation flow
+- Fix LMS_Power (lms_drv.c): translate NCL_STATUS_T to DEFS_STATUS by comparing against
+  NCL_STATUS_OK instead of a raw enum cast, fixing a GCC 13 -Wenum-conversion build error
 - Fix tip_ecc_hw_ncl_engine_ecdsa_sign to return actual NCL status instead of hardcoded NCL_STATUS_OK
 - Fix tip_ecc_hw_ncl_engine_ecdsa_verify: replace NCL_STATUS_RET_CHECK_MUTEX with hardened pattern
   (positive equality checks on both ret and sigOk, anti-glitch re-verify) to prevent glitch-induced

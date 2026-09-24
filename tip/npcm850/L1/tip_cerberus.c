@@ -2656,8 +2656,17 @@ static void cerberus_init (void *unused)
 	manifest_root_key.length = key->key.ecc_der->length;
 #endif
 
+	/* Composite EAT's BMC-direct call chain adds ~480 bytes to bmc_task_loop's own stack
+	 * frame (confirmed via disassembly, sub.w sp,sp,#604 vs #124 without it), which
+	 * overflowed the original budget during BMC reset reload. Add margin only for builds
+	 * that actually pull in that code. */
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+	status = bmc_task_init (&bmc_reset_task, CERBERUS_PRIORITY_BACKGROUND, 256 * 3 + 128 + 256,
+		&tip_system);
+#else
 	status = bmc_task_init (&bmc_reset_task, CERBERUS_PRIORITY_BACKGROUND, 256 * 3 + 128,
 		&tip_system);
+#endif
 	if (status != 0) {
 		error_msg = INIT_LOGGING_BMC_TASK;
 		goto reset;

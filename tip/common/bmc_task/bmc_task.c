@@ -38,6 +38,12 @@
 #include "tip_rng_ncl.h"
 #include "tip_aes_ncl.h"
 #endif
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+#include "composite_eat/bmc_direct/bmc_direct_composite_eat_abi.h"
+#include "composite_eat/bmc_direct/bmc_direct_composite_eat_status.h"
+#include "composite_eat/bmc_direct/bmc_direct_composite_eat_transport.h"
+#include "composite_eat/tip_main_token_generator.h"
+#endif
 
 /**
  * Buffer to store Bootblock hash.
@@ -129,6 +135,16 @@ extern struct tip_hash_ncl_engine system_hash;
 
 extern struct tip_rom_ncl_shared_state *ncl_shared_state;
 
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+static struct bmc_direct_composite_eat_state composite_eat_state;
+static struct composite_eat_tip_main_token_generator *composite_eat_main_token_generator;
+
+_Static_assert (COMPOSITE_EAT_TIP_REQUEST_SNAPSHOT_MAX ==
+	BMC_DIRECT_COMPOSITE_EAT_REQ_SIZE, "Composite EAT request snapshot must match the ABI");
+_Static_assert (COMPOSITE_EAT_TIP_MAX_RESPONSE_LENGTH ==
+	BMC_DIRECT_COMPOSITE_EAT_RESP_SIZE, "Composite EAT response limit must match the ABI");
+#endif
+
 /**
  * Hardware ECC engine.
  */
@@ -203,6 +219,11 @@ void NVIC_BMC_reset (uint16_t num)
 
 	tip_bmc_tim_disable_all_wd ();
 
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+	bmc_direct_composite_eat_reset (&composite_eat_state);
+	NVIC_EnableInt (NVIC_INT_2, FALSE);
+#endif
+
 	/* interrupt will be reenabled after BMC is reloaded in bmc_task */
 	NVIC_EnableInt (NVIC_INT_46, FALSE);
 
@@ -248,6 +269,118 @@ static void tip_bmc_direct_finalize_command (int status, UINT32 notification)
 	/* notify BMC on complition */
 	tip_mbx_notify_to_bmc (notification);
 }
+#endif
+
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+void bmc_direct_composite_eat_configure (
+	struct composite_eat_tip_main_token_generator *generator)
+{
+	composite_eat_main_token_generator = generator;
+	bmc_direct_composite_eat_reset (&composite_eat_state);
+	tip_mbx_clear_notification (BMC_DIRECT_NOTIFICATION_COMPOSITE_EAT);
+	NVIC_ClearInt (NVIC_INT_2);
+	NVIC_EnableInt (NVIC_INT_2, TRUE);
+}
+
+static void bmc_direct_composite_eat_write_scratchpad (void *context, uint32_t index,
+	uint32_t value)
+{
+	(void) context;
+	REG_WRITE (SCRPAD_10_41 (index), value);
+}
+
+static void bmc_direct_composite_eat_memory_barrier (void *context)
+{
+	(void) context;
+	__asm volatile("dmb" ::: "memory");
+}
+
+static void bmc_direct_composite_eat_clear_notification (void *context,
+	uint32_t notification)
+{
+	(void) context;
+	tip_mbx_clear_notification (notification);
+}
+
+static void bmc_direct_composite_eat_notify_bmc (void *context, uint32_t notification)
+{
+	(void) context;
+	tip_mbx_notify_to_bmc (notification);
+}
+
+static const struct bmc_direct_composite_eat_publication_ops composite_eat_publication_ops = {
+	.write_scratchpad = bmc_direct_composite_eat_write_scratchpad,
+	.memory_barrier = bmc_direct_composite_eat_memory_barrier,
+	.clear_notification = bmc_direct_composite_eat_clear_notification,
+	.notify_bmc = bmc_direct_composite_eat_notify_bmc,
+};
+
+static void bmc_direct_composite_eat_publish (enum bmc_direct_composite_eat_status status,
+	uint32_t response_length, uint32_t request_id)
+{
+	(void) bmc_direct_composite_eat_publish_response (&composite_eat_publication_ops, NULL,
+		status, response_length, request_id);
+}
+
+static bool bmc_direct_composite_eat_finish (enum bmc_direct_composite_eat_status status,
+	uint32_t response_length, const struct bmc_direct_composite_eat_request *request)
+{
+	DISABLE_INTERRUPTS ();
+	if (!bmc_direct_composite_eat_request_current (&composite_eat_state, request)) {
+		ENABLE_INTERRUPTS ();
+		return false;
+	}
+
+	bmc_direct_composite_eat_publish (status, response_length, request->id);
+	bmc_direct_composite_eat_complete (&composite_eat_state);
+	NVIC_ClearInt (NVIC_INT_2);
+	NVIC_EnableInt (NVIC_INT_2, TRUE);
+	ENABLE_INTERRUPTS ();
+	return true;
+}
+
+struct bmc_direct_composite_eat_output {
+	const struct bmc_direct_composite_eat_request *request;
+	size_t offset;
+};
+
+static void bmc_direct_composite_eat_output_lock (void *context)
+{
+	(void) context;
+	DISABLE_INTERRUPTS ();
+}
+
+static void bmc_direct_composite_eat_output_unlock (void *context)
+{
+	(void) context;
+	ENABLE_INTERRUPTS ();
+}
+
+static int bmc_direct_composite_eat_output_write (void *context, uint32_t address,
+	const uint8_t *data, size_t length)
+{
+	(void) context;
+	memcpy ((void *) (uintptr_t) address, data, length);
+	return 0;
+}
+
+static const struct bmc_direct_composite_eat_output_ops composite_eat_output_ops = {
+	.lock = bmc_direct_composite_eat_output_lock,
+	.unlock = bmc_direct_composite_eat_output_unlock,
+	.write = bmc_direct_composite_eat_output_write,
+};
+
+static int bmc_direct_composite_eat_write_output (void *context, const uint8_t *data,
+	size_t length)
+{
+	struct bmc_direct_composite_eat_output *output = context;
+
+	return bmc_direct_composite_eat_write_response (&composite_eat_state, output->request,
+		&composite_eat_output_ops, NULL, &output->offset, data, length) ? 0 : -1;
+}
+#endif
+
+#if defined(BMC_DIRECT) || defined(BMC_DIRECT_COMPOSITE_EAT)
 
 void NVIC_BMC_direct_handler (uint16_t num)
 {
@@ -272,6 +405,104 @@ void NVIC_BMC_direct_handler (uint16_t num)
 		"======== TIP_FW: detected BMC int %d notification %#010lx cmd %#010lx" NEWLINE KNRM,
 		int_num, notification, REG_READ (FLASH_STATUS_COMMAND_SCR));
 
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+	if ((notification & BMC_DIRECT_NOTIFICATION_COMPOSITE_EAT) != 0) {
+		struct bmc_direct_composite_eat_request request = {0};
+		const uint8_t *request_snapshot;
+		enum composite_eat_tip_main_token_status snapshot_status;
+		uint32_t command =
+			REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_COMMAND));
+
+		request.id = REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_REQUEST_ID));
+		request.request_address =
+			REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_REQ_ADDR));
+		request.request_length =
+			REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_REQ_LEN));
+		request.response_address =
+			REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_RESP_ADDR));
+		request.response_capacity =
+			REG_READ (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_RESP_CAP));
+		REG_WRITE (SCRPAD_10_41 (BMC_DIRECT_COMPOSITE_EAT_SCRPAD_COMMAND), 0xffffffffu);
+
+		if (command != BMC_DIRECT_COMMAND_COMPOSITE_EAT) {
+			bmc_direct_composite_eat_publish (BMC_DIRECT_COMPOSITE_EAT_UNSUPPORTED, 0,
+				request.id);
+			goto composite_eat_rearm;
+		}
+		if (request.request_length > BMC_DIRECT_COMPOSITE_EAT_REQ_SIZE) {
+			bmc_direct_composite_eat_publish (BMC_DIRECT_COMPOSITE_EAT_REQUEST_TOO_LARGE,
+				0, request.id);
+			goto composite_eat_rearm;
+		}
+		if (!bmc_direct_composite_eat_buffers_valid (request.request_address,
+			request.request_length, request.response_address, request.response_capacity)) {
+			bmc_direct_composite_eat_publish (BMC_DIRECT_COMPOSITE_EAT_ADDRESS_INVALID, 0,
+				request.id);
+			goto composite_eat_rearm;
+		}
+		if (!bmc_direct_composite_eat_begin (&composite_eat_state, &request)) {
+			bmc_direct_composite_eat_publish (BMC_DIRECT_COMPOSITE_EAT_BUSY, 0, request.id);
+			goto composite_eat_rearm;
+		}
+		request = composite_eat_state.pending;
+		if (composite_eat_main_token_generator == NULL) {
+			(void) bmc_direct_composite_eat_finish (BMC_DIRECT_COMPOSITE_EAT_INTERNAL, 0,
+				&request);
+			return;
+		}
+		snapshot_status = composite_eat_tip_main_token_snapshot_request (
+			composite_eat_main_token_generator,
+			(const uint8_t *) (uintptr_t) request.request_address, request.request_length,
+			&request_snapshot);
+		if (snapshot_status != COMPOSITE_EAT_TIP_MAIN_TOKEN_OK) {
+			(void) bmc_direct_composite_eat_finish (BMC_DIRECT_COMPOSITE_EAT_INTERNAL, 0,
+				&request);
+			return;
+		}
+		composite_eat_state.pending.request_address = (uint32_t) (uintptr_t) request_snapshot;
+		request = composite_eat_state.pending;
+		if (!bmc_direct_composite_eat_request_current (&composite_eat_state, &request)) {
+			return;
+		}
+		if (xTaskNotifyFromISR (bmc_reset_task.bmc_task, BMC_DIRECT_COMPOSITE_EAT_TASK_EVENT,
+			eSetValueWithoutOverwrite, &reset_priority) != pdPASS) {
+			(void) bmc_direct_composite_eat_finish (BMC_DIRECT_COMPOSITE_EAT_BUSY, 0,
+				&request);
+			return;
+		}
+		tip_mbx_clear_notification (BMC_DIRECT_NOTIFICATION_COMPOSITE_EAT);
+		__asm volatile("dmb" ::: "memory");
+		NVIC_ClearInt (int_num);
+		NVIC_EnableInt (int_num, TRUE);
+		return;
+
+	composite_eat_rearm:
+		NVIC_ClearInt (int_num);
+		NVIC_EnableInt (int_num, TRUE);
+		return;
+	}
+#endif
+
+#ifdef BMC_DIRECT
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+	if (composite_eat_state.active) {
+		if ((notification & BMC_DIRECT_NOTIFCATION_FL) != 0) {
+			tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_PKT_STATE,
+				BMC_DIRECT_NOTIFCATION_FL);
+			return;
+		}
+		if ((notification & BMC_DIRECT_NOTIFCATION_RNG) != 0) {
+			tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_PKT_STATE,
+				BMC_DIRECT_NOTIFCATION_RNG);
+			return;
+		}
+		if ((notification & BMC_DIRECT_NOTIFCATION_AES) != 0) {
+			tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_PKT_STATE,
+				BMC_DIRECT_NOTIFCATION_AES);
+			return;
+		}
+	}
+#endif
 	/* check if it's a BMC_DIRECT Flash command */
 	if ((notification & BMC_DIRECT_NOTIFCATION_FL) > 0) {
 		notification_active = BMC_DIRECT_NOTIFCATION_FL;
@@ -346,8 +577,13 @@ void NVIC_BMC_direct_handler (uint16_t num)
 	/* Clear BMC notification event */
 	NVIC_ClearInt (int_num);
 	NVIC_EnableInt (int_num, TRUE);
+#else
+	tip_mbx_clear_notification (notification);
+	NVIC_ClearInt (int_num);
+	NVIC_EnableInt (int_num, TRUE);
+#endif
 }
-#endif /* BMC_DIRECT */
+#endif /* BMC_DIRECT || BMC_DIRECT_COMPOSITE_EAT */
 
 
 /**
@@ -700,6 +936,9 @@ static void bmc_task_loop (void *data)
 		else if (task->bmc_state == BMC_DDR_READY) {
 			switch (notification) {
 				case BMC_RESET_CMD:
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+					bmc_direct_composite_eat_reset (&composite_eat_state);
+#endif
 					/* slow peripherals are configured to be reset in BMC reset */
 					serial_printf_init (!tip_L1_sys_ctrl.tip_disable_print_to_uart, tip_L1_sys_ctrl.tip_print_to_memory);
 
@@ -793,10 +1032,19 @@ static void bmc_task_loop (void *data)
 							tip_reset_counters_init (reset_counter);
 						}
 
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+						bmc_direct_composite_eat_reset (&composite_eat_state);
+						tip_mbx_clear_notification (BMC_DIRECT_NOTIFICATION_COMPOSITE_EAT);
+#endif
+
 						bmc_continue ();
 
 						/* Reenable the IRQ after complition */
 						NVIC_EnableInt (NVIC_INT_46, TRUE);
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+						NVIC_ClearInt (NVIC_INT_2);
+						NVIC_EnableInt (NVIC_INT_2, TRUE);
+#endif
 #ifdef GPIO_WOL
 						/* Reenable the GPIO IRQ after complition */
 						if (tip_L1_sys_ctrl.tip_gpio_wol) {
@@ -810,6 +1058,36 @@ static void bmc_task_loop (void *data)
 					}
 
 					break;
+#ifdef BMC_DIRECT_COMPOSITE_EAT
+				case BMC_DIRECT_COMPOSITE_EAT_TASK_EVENT: {
+					struct bmc_direct_composite_eat_request request = composite_eat_state.pending;
+					struct bmc_direct_composite_eat_output output = {
+						.request = &request,
+					};
+					size_t response_length = 0;
+					enum composite_eat_tip_main_token_status generation_status;
+					enum bmc_direct_composite_eat_status response_status;
+
+					if ((composite_eat_main_token_generator == NULL) ||
+						!composite_eat_state.active) {
+						(void) bmc_direct_composite_eat_finish (
+							BMC_DIRECT_COMPOSITE_EAT_INTERNAL, 0, &request);
+						break;
+					}
+
+					generation_status = composite_eat_tip_main_token_generate_write (
+						composite_eat_main_token_generator,
+						(const uint8_t *) (uintptr_t) request.request_address,
+						request.request_length,
+						bmc_direct_composite_eat_write_output, &output,
+						request.response_capacity, &response_length);
+					response_status = bmc_direct_composite_eat_map_main_token_status (
+						generation_status);
+					(void) bmc_direct_composite_eat_finish (response_status,
+						(uint32_t) response_length, &request);
+					break;
+				}
+#endif
 #ifdef BMC_DIRECT
 				case BMC_DIRECT_COMMAND_FL_PROG: {
 					uint32_t fiu, cs, spi, offset;
@@ -971,7 +1249,7 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 				case BMC_DIRECT_COMMAND_DRBG: {
 					uint32_t num_of_random_bytes = REG_READ (RNG_SIZE_SCR);
 					uint32_t addr = REG_READ (RNG_BUFFER_ADDR_SCR);
-				
+
 					/* copy to secured staging area */
 					platform_printf_dbg (KGRN
 						"DRBG: create %#010lx rand bytes at %#010lx" NEWLINE KNRM,
@@ -995,7 +1273,7 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 				case BMC_DIRECT_COMMAND_AES_ENC_CTR:
 				case BMC_DIRECT_COMMAND_AES_ENC_GCM:
 
-					
+
 				case BMC_DIRECT_COMMAND_AES_DEC_ECB:
 				case BMC_DIRECT_COMMAND_AES_DEC_CBC:
 				case BMC_DIRECT_COMMAND_AES_DEC_CTR:
@@ -1006,7 +1284,7 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 
 					/*
 					 * SCRPAD 24 – address of block to encrypt/decrypt
-					 * SCRPAD 25 – size of block 
+					 * SCRPAD 25 – size of block
 					 * SCRPAD 26 – operation. 0 encrypt, 1 decrypt
 					 * SCRPAD 27 – destination of AES output
 					 * SCRPAD 28 – IV info
@@ -1022,7 +1300,7 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 						uint32_t size;
 						uint32_t arr;
 					};
-	
+
 					uint32_t addr_src = REG_READ (AES_BLOCK_ADDR_SCR);
 					uint32_t addr_dst = REG_READ (AES_OUTPUT_ADDR_SCR);
 					uint32_t size = REG_READ (AES_BLOCK_SIZE_SCR);
@@ -1030,7 +1308,7 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 					struct info *iv_info = (struct info *)REG_READ (AES_IV_INFO_SCR);
 					struct info *key_info = (struct info *)REG_READ (AES_KEY_INFO_SCR);
 					struct info *tag_info = (struct info *)REG_READ (AES_TAG_INFO_SCR);
-					
+
 					uint8_t *iv = NULL;
 					uint32_t iv_size = 0;
 					uint8_t *key = NULL;
@@ -1072,9 +1350,9 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 						"key = %#010lx "
 						"key_size = %#010lx "
 						"tag = %#010lx "
-						"tag_size = %#010lx " 
+						"tag_size = %#010lx "
 						"op = %x "
-						"mode = %x " NEWLINE, 
+						"mode = %x " NEWLINE,
 						addr_src, addr_dst, size, iv, iv_size, key, key_size, tag, tag_size, op, mode);
 
 						status = fw_enc_dec_aes.set_mode (&fw_enc_dec_aes, mode);
@@ -1253,14 +1531,16 @@ void bmc_export_data (void)
 	uint8_t *mailbox = (uint8_t *) PCIMBX_BASE_ADDR (0);
 	struct riot_shared_attestation *riot = (struct riot_shared_attestation *) RIOT_SHARED_ADDRESS;
 	uint32_t chip_revision = CHIP_Get_Version ();
-	extern uint32_t __dme_dice_table_start;
-	SEC_DME_DICE_T_A2 *dme_dice = (SEC_DME_DICE_T_A2 *) &__dme_dice_table_start;
+	struct tip_rom_dme_public_evidence dme;
 	size_t size_to_copy;
 	uint8_t *mailbox_attestation;
 	int status;
 
 	/* export not needed for Z1 */
-	if (chip_revision == 0x00) {
+	if (chip_revision == ARBEL_VERSION_Z1) {
+		return;
+	}
+	if (tip_rom_dme_handoff_get (&dme) != TIP_ROM_DME_HANDOFF_OK) {
 		return;
 	}
 
@@ -1270,73 +1550,42 @@ void bmc_export_data (void)
 	memset (mailbox, 0, PCIMBX_RAM_SIZE);
 #endif
 
-	/* A2 and above */
-	if (chip_revision >= 0x08) {
-		platform_printf ("export dme_nonce at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dme_dice->dme_nonce));
-		memcpy (mailbox, (uint8_t *) dme_dice->dme_nonce, sizeof (dme_dice->dme_nonce));
-		mailbox += sizeof (dme_dice->dme_nonce);
+	platform_printf ("export dme_nonce at %#010lx %dB" NEWLINE, mailbox,
+		dme.dme_nonce.length);
+	memcpy (mailbox, dme.dme_nonce.data, dme.dme_nonce.length);
+	mailbox += dme.dme_nonce.length;
 
+	if (dme.dme_challenge.length != 0) {
 		platform_printf ("export dme_challenge at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dme_dice->dme_challenge));
-		memcpy (mailbox, (uint8_t *) dme_dice->dme_challenge, sizeof (dme_dice->dme_challenge));
-		mailbox += sizeof (dme_dice->dme_challenge);
-
-		platform_printf ("export dice_pub_key at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dme_dice->dice_pub_key));
-		memcpy (mailbox, (uint8_t *) dme_dice->dice_pub_key, sizeof (dme_dice->dice_pub_key));
-		mailbox += sizeof (dme_dice->dice_pub_key);
-
-		platform_printf ("export dme_pcr0 at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dme_dice->dme_pcr0));
-		memcpy (mailbox, (uint8_t *) dme_dice->dme_pcr0, sizeof (dme_dice->dme_pcr0));
-		mailbox += sizeof (dme_dice->dme_pcr0);
-
-		platform_printf ("export dme_pub_key at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dme_dice->dme_pub_key));
-		memcpy (mailbox, (uint8_t *) dme_dice->dme_pub_key, sizeof (dme_dice->dme_pub_key));
-		mailbox += sizeof (dme_dice->dme_pub_key);
-
-		platform_printf ("export dme_signature at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dme_dice->dme_signature));
-		memcpy (mailbox, (uint8_t *) dme_dice->dme_signature, sizeof (dme_dice->dme_signature));
-		mailbox += sizeof (dme_dice->dme_signature);
+			dme.dme_challenge.length);
+		memcpy (mailbox, dme.dme_challenge.data, dme.dme_challenge.length);
 	}
-
-	/* A1 */
-	if (chip_revision == 0x04) {
-		SEC_DME_DICE_T_A1 *dice_a1 = (SEC_DME_DICE_T_A1 *) &dme_dice;
-
-		platform_printf ("export dme_nonce at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dice_a1->dme_nonce));
-		memcpy (mailbox, (uint8_t *) dice_a1->dme_nonce, sizeof (dice_a1->dme_nonce));
-		mailbox += sizeof (dice_a1->dme_nonce);
-
-		platform_printf ("export challenge not supported for A1. clear %#010lx %dB" NEWLINE,
-			mailbox, sizeof (dice_a1->dme_nonce));
-		memset (mailbox, 0, sizeof (dme_dice->dme_challenge));
-		mailbox += sizeof (dme_dice->dme_challenge);
-
-		platform_printf ("export dice_pub_key at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dice_a1->dice_pub_key));
-		memcpy (mailbox, (uint8_t *) dice_a1->dice_pub_key, sizeof (dice_a1->dice_pub_key));
-		mailbox += sizeof (dice_a1->dice_pub_key);
-
-		platform_printf ("export dme_pcr0 at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dice_a1->dme_pcr0));
-		memcpy (mailbox, (uint8_t *) dice_a1->dme_pcr0, sizeof (dice_a1->dme_pcr0));
-		mailbox += sizeof (dice_a1->dme_pcr0);
-
-		platform_printf ("export dme_pub_key at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dice_a1->dme_pub_key));
-		memcpy (mailbox, (uint8_t *) dice_a1->dme_pub_key, sizeof (dice_a1->dme_pub_key));
-		mailbox += sizeof (dice_a1->dme_pub_key);
-
-		platform_printf ("export dme_signature at %#010lx %dB" NEWLINE, mailbox,
-			sizeof (dice_a1->dme_signature));
-		memcpy (mailbox, (uint8_t *) dice_a1->dme_signature, sizeof (dice_a1->dme_signature));
-		mailbox += sizeof (dice_a1->dme_signature);
+	else {
+		platform_printf ("export challenge not supported. clear %#010lx %dB" NEWLINE,
+			mailbox, SEC_DME_CHALLENGE_LENGTH);
+		memset (mailbox, 0, SEC_DME_CHALLENGE_LENGTH);
 	}
+	mailbox += SEC_DME_CHALLENGE_LENGTH;
+
+	platform_printf ("export dice_pub_key at %#010lx %dB" NEWLINE, mailbox,
+		dme.dice_public_key.length);
+	memcpy (mailbox, dme.dice_public_key.data, dme.dice_public_key.length);
+	mailbox += dme.dice_public_key.length;
+
+	platform_printf ("export dme_pcr0 at %#010lx %dB" NEWLINE, mailbox,
+		dme.dme_pcr0.length);
+	memcpy (mailbox, dme.dme_pcr0.data, dme.dme_pcr0.length);
+	mailbox += dme.dme_pcr0.length;
+
+	platform_printf ("export dme_pub_key at %#010lx %dB" NEWLINE, mailbox,
+		dme.dme_public_key.length);
+	memcpy (mailbox, dme.dme_public_key.data, dme.dme_public_key.length);
+	mailbox += dme.dme_public_key.length;
+
+	platform_printf ("export dme_signature at %#010lx %dB" NEWLINE, mailbox,
+		dme.dme_signature.length);
+	memcpy (mailbox, dme.dme_signature.data, dme.dme_signature.length);
+	mailbox += dme.dme_signature.length;
 
 	/* Copy shared attestation area, excluding alias_key */
 	size_to_copy = offsetof(struct riot_shared_attestation, alias_key);

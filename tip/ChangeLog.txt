@@ -1,5 +1,22 @@
-TBD:
+0.8.9 L0 0.7.8 L1
 =================
+- Add TIP Composite EAT support (tip/common/composite_eat/): RoT-neutral protocol machinery and
+  feature-gated TIP integration producing a signed Composite EAT main token (CWT/COSE encoding,
+  TCG DICE Concise Evidence model), including a BMC-direct shared-memory transport (PR #4/#5, xsun)
+  - Vendor QCBOR dependency
+  - Add strict request decoder, TCG Concise Evidence support, streaming token builder
+  - Add BMC/TIP evidence adapters, TIP signing integration, BMC-direct Composite EAT transport
+  - Add standalone protocol tests and BMC/TIP integration tests
+- Add tip_rom_dme_handoff: DME (Device Measurement Environment) handoff support used by the
+  Composite EAT generation flow; consolidates the previously inline SEC_DME_* structs in tip_boot.h
+- Add GitHub Actions CI workflow to build TIP FW (L0 + L1) on every push/PR
+- Add build_tip_fw.sh (later renamed quick_build.sh): root-level wrapper to build TIP FW and place
+  outputs at workspace root; build now outputs straight into bld_boot/bld_cerberus
+- Enable TIP_COMPOSITE_EAT in the CI build so L1 actually validates the composite EAT feature
+- Fix LMS_Power (lms_drv.c): translate NCL_STATUS_T to DEFS_STATUS by comparing against
+  NCL_STATUS_OK instead of a raw enum cast, fixing a GCC 13 -Wenum-conversion build error
+- Update build/manifest instructions to use GitHub (npcm8xx-tip-fw-manifest) instead of the
+  retired Azure DevOps manifest
 - Fix tip_ecc_hw_ncl_engine_ecdsa_sign to return actual NCL status instead of hardcoded NCL_STATUS_OK
 - Fix tip_ecc_hw_ncl_engine_ecdsa_verify: replace NCL_STATUS_RET_CHECK_MUTEX with hardened pattern
   (positive equality checks on both ret and sigOk, anti-glitch re-verify) to prevent glitch-induced

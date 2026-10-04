@@ -11,6 +11,7 @@
 #include "firmware/firmware_logging.h"
 #include "tip_image_combo.h"
 #include "tip_version.h"
+#include "rot_memory_map.h"
 
 #define RUN_UPDATE_BIT 			(1 << 0)
 #define PREP_STAGING_BIT 		(1 << 1)
@@ -239,33 +240,65 @@ static void tip_fw_update_task_updater (struct tip_fw_update_task *task)
 	} while (1);
 }
 
-static int tip_fw_update_task_start_update (const struct firmware_update_control *update)
+/** Reserve update ownership before any caller writes to the shared staging area. */
+static int tip_fw_update_task_reserve_update (struct tip_fw_update_task *task)
 {
-	struct tip_fw_update_task *task = (struct tip_fw_update_task*) update;
 	int status = 0;
 
-	if (task == NULL) {
+	if ((task == NULL) || (task->lock == NULL)) {
 		return FIRMWARE_UPDATE_INVALID_ARGUMENT;
 	}
-
-	if (task->task) {
-		xSemaphoreTake (task->lock, portMAX_DELAY);
-		if (!task->running) {
-			task->update_status = UPDATE_STATUS_STARTING;
-			task->running = 1;
-			xSemaphoreGive (task->lock);
-			xTaskNotify (task->task, RUN_UPDATE_BIT, eSetBits);
-		} else {
-			task->update_status = UPDATE_STATUS_REQUEST_BLOCKED;
-			status = FIRMWARE_UPDATE_TASK_BUSY;
-			xSemaphoreGive (task->lock);
-		}
-	} else {
+	if (xSemaphoreTake (task->lock, portMAX_DELAY) != pdTRUE) {
+		return FIRMWARE_UPDATE_TASK_BUSY;
+	}
+	if (task->task == NULL) {
 		task->update_status = UPDATE_STATUS_TASK_NOT_RUNNING;
 		status = FIRMWARE_UPDATE_NO_TASK;
 	}
-
+	else if (task->running) {
+		task->update_status = UPDATE_STATUS_REQUEST_BLOCKED;
+		status = FIRMWARE_UPDATE_TASK_BUSY;
+	}
+	else {
+		task->update_status = UPDATE_STATUS_STARTING;
+		task->running = 1;
+	}
+	xSemaphoreGive (task->lock);
 	return status;
+}
+
+static int tip_fw_update_task_start_update (const struct firmware_update_control *update)
+{
+	struct tip_fw_update_task *task = (struct tip_fw_update_task*) update;
+	int status = tip_fw_update_task_reserve_update (task);
+
+	if (status == 0) {
+		xTaskNotify (task->task, RUN_UPDATE_BIT, eSetBits);
+	}
+	return status;
+}
+
+/**
+ * Reserve the updater, copy an isolated source into staging, then start it.
+ * The caller must validate the source range before calling this function.
+ * Ownership remains reserved while copying, so other update and staging
+ * requests cannot modify the bytes that this updater will consume.
+ */
+int tip_fw_update_task_stage_and_start (struct tip_fw_update_task *task,
+	const uint8_t *source, size_t size)
+{
+	int status;
+
+	if ((source == NULL) || (size == 0) || (size > ROT_STAGING_SIZE)) {
+		return FIRMWARE_UPDATE_INVALID_ARGUMENT;
+	}
+	status = tip_fw_update_task_reserve_update (task);
+	if (status != 0) {
+		return status;
+	}
+	memcpy ((void *) TIP_VIRTUAL_FLASH_BASE_ADDR, source, size);
+	xTaskNotify (task->task, RUN_UPDATE_BIT, eSetBits);
+	return 0;
 }
 
 static int tip_fw_update_task_get_status (const struct firmware_update_control *update)

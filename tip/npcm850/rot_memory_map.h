@@ -105,6 +105,16 @@
 #define ROT_STAGING_SIZE 					_16MB_
 
 /***********************
+ * BMC DDR window
+ ***********************/
+
+/**
+ * Bounds of the SDRAM window that every BMC-direct command buffer must lie within.
+ */
+#define BMC_DDR_BASE_ADDR 					0x06000000UL /* 96 MB */
+#define BMC_DDR_END_ADDR 					(SDRAM_BASE_ADDR + SDRAM_MAPPED_SIZE) /* 2048 MB */
+
+/***********************
  * Shared memory
  **********************/
 

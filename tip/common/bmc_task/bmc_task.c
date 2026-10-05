@@ -220,17 +220,14 @@ void NVIC_BMC_reset (uint16_t num)
 }
 
 #ifdef BMC_DIRECT
-/** Start of the BMC-owned SDRAM window that every BMC-direct buffer must lie within. */
-#define BMC_DIRECT_DDR_WINDOW_FIRST_ADDR (96U * _1MB_)
-
 /**
  * Check the complete nonempty buffer against the BMC SDRAM window.
  * Subtraction after the address checks avoids attacker-controlled wraparound.
  */
 static bool bmc_direct_range_valid (uint32_t addr, uint32_t length)
 {
-	const uint32_t first = BMC_DIRECT_DDR_WINDOW_FIRST_ADDR;
-	const uint32_t end = SDRAM_MAPPED_SIZE;
+	const uint32_t first = BMC_DDR_BASE_ADDR;
+	const uint32_t end = BMC_DDR_END_ADDR;
 
 	return (length != 0) && (addr >= first) && (addr < end) &&
 		(length <= end - addr);

@@ -2638,7 +2638,9 @@ static void cerberus_init (void *unused)
 	manifest_root_key.length = key->key.ecc_der->length;
 #endif
 
-	status = bmc_task_init (&bmc_reset_task, CERBERUS_PRIORITY_BACKGROUND, 256 * 3 + 128,
+	/* Extra margin: BMC_DIRECT validation code inlined into bmc_task_loop grows its stack frame
+	 * enough to overflow the original budget during BOOTBLOCK/BL31 verification on BMC reset. */
+	status = bmc_task_init (&bmc_reset_task, CERBERUS_PRIORITY_BACKGROUND, 256 * 3 + 128 + 256,
 		&tip_system);
 	if (status != 0) {
 		error_msg = INIT_LOGGING_BMC_TASK;

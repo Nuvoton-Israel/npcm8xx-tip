@@ -259,7 +259,8 @@ static bool bmc_direct_aes_info_valid (uint32_t addr, uint8_t **buffer, uint32_t
 		/* IV/key diagnostics read a full word for any partial final word. */
 		access_length = (access_length + 3U) & ~3U;
 	}
-	/* The deployed 11-bit encoding bounds header plus access extent to 2052. */
+	/* encoded_length is an 11-bit field (max 2047); word-aligning can push access_length
+	 * to 2048, so the header + payload range checked below never exceeds 2052 bytes. */
 	if (!bmc_direct_range_valid (addr, sizeof (encoded_length) + access_length)) {
 		return false;
 	}

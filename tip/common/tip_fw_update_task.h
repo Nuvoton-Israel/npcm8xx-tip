@@ -63,5 +63,17 @@ int tip_fw_update_task_init (struct tip_fw_update_task *task, struct firmware_up
 int tip_fw_update_task_start (struct tip_fw_update_task *task, uint16_t stack_words,
 	bool running_recovery);
 
+/**
+ * Reserve exclusive update ownership, copy a validated source to staging, and
+ * notify the updater after the copy completes. Busy/absent tasks leave staging
+ * untouched. The caller must isolate the complete source buffer before access.
+ *
+ * @param task The initialized update task.
+ * @param source The caller-validated source buffer.
+ * @param size The nonzero image size, at most ROT_STAGING_SIZE.
+ * @return 0 if staged and queued, or an existing firmware update error.
+ */
+int tip_fw_update_task_stage_and_start (struct tip_fw_update_task *task,
+	const uint8_t *source, size_t size);
 
 #endif /* TIP_FW_UPDATE_TASK_H_ */

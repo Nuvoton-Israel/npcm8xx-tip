@@ -220,6 +220,55 @@ void NVIC_BMC_reset (uint16_t num)
 }
 
 #ifdef BMC_DIRECT
+/**
+ * Check the complete nonempty buffer against the BMC SDRAM window.
+ * Subtraction after the address checks avoids attacker-controlled wraparound.
+ */
+static bool bmc_direct_range_valid (uint32_t addr, uint32_t length)
+{
+	const uint32_t first = BMC_DDR_BASE_ADDR;
+	const uint32_t end = BMC_DDR_END_ADDR;
+
+	return (length != 0) && (addr >= first) && (addr < end) &&
+		(length <= end - addr);
+}
+
+/**
+ * Decode an optional inline AES descriptor only after its header is isolated.
+ * Snapshot the length once and validate the entire header and payload before
+ * making the payload pointer available to the crypto engine.
+ */
+static bool bmc_direct_aes_info_valid (uint32_t addr, uint8_t **buffer, uint32_t *length,
+	bool word_reads, uint32_t minimum_length)
+{
+	uint32_t encoded_length;
+
+	if (addr == 0) {
+		return true;
+	}
+	if (!bmc_direct_range_valid (addr, sizeof (encoded_length))) {
+		return false;
+	}
+	memcpy (&encoded_length, (const void *) addr, sizeof (encoded_length));
+	encoded_length &= 0x000007FFU;
+	uint32_t access_length = encoded_length;
+	if (access_length < minimum_length) {
+		access_length = minimum_length;
+	}
+	if (word_reads) {
+		/* IV/key diagnostics read a full word for any partial final word. */
+		access_length = (access_length + 3U) & ~3U;
+	}
+	/* encoded_length is an 11-bit field (max 2047); word-aligning can push access_length
+	 * to 2048, so the header + payload range checked below never exceeds 2052 bytes. */
+	if (!bmc_direct_range_valid (addr, sizeof (encoded_length) + access_length)) {
+		return false;
+	}
+	*buffer = (uint8_t *) (addr + sizeof (encoded_length));
+	*length = encoded_length;
+	return true;
+}
+
 static void tip_bmc_direct_finalize_command (int status, UINT32 notification)
 {
 	if (ROT_IS_ERROR(status) == false) {
@@ -818,13 +867,20 @@ static void bmc_task_loop (void *data)
 					uint32_t dst_addr = REG_READ (FLASH_PRM2_SCR);
 					uint32_t size = REG_READ (FLASH_PRM3_SCR);
 
+					if (!bmc_direct_range_valid (src_addr, size)) {
+						tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_ARGUMENT,
+							BMC_DIRECT_NOTIFCATION_FL);
+						break;
+					}
+
 					status = tip_flash_phys_to_logical (dst_addr, &fiu, &cs, &spi, &offset);
 					if (status != 0) {
 						platform_printf (KRED "error %#010lx out of range" NEWLINE KNRM, dst_addr);
 					} else {
 						fl = tip_flash_get_spi_flash (spi);
 
-						if (offset + size > fl->state->device_size) {
+						if ((offset >= fl->state->device_size) ||
+							(size > fl->state->device_size - offset)) {
 							platform_printf (KRED "error end addr %#010lx out of flash (size=%#010lx)" NEWLINE KNRM,
 								offset + size, fl->state->device_size);
 							status = FLASH_ADDRESS_OUT_OF_RANGE;
@@ -846,6 +902,12 @@ static void bmc_task_loop (void *data)
 					uint32_t dst_addr = REG_READ (FLASH_PRM2_SCR);
 					uint32_t size = REG_READ (FLASH_PRM3_SCR);
 
+					if (!bmc_direct_range_valid (dst_addr, size)) {
+						tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_ARGUMENT,
+							BMC_DIRECT_NOTIFCATION_FL);
+						break;
+					}
+
 					status = tip_flash_phys_to_logical (src_addr, &fiu, &cs, &spi, &offset);
 					if (status != 0) {
 						platform_printf (KRED "error %#010lx out of range" NEWLINE KNRM, src_addr);
@@ -854,7 +916,8 @@ static void bmc_task_loop (void *data)
 					}
 					fl = tip_flash_get_spi_flash (spi);
 
-					if (offset + size > fl->state->device_size) {
+					if ((offset >= fl->state->device_size) ||
+							(size > fl->state->device_size - offset)) {
 						platform_printf (KRED "error end addr %#010lx out of flash (size=%#010lx)" NEWLINE KNRM,
 							offset + size, fl->state->device_size);
 						status = FLASH_ADDRESS_OUT_OF_RANGE;
@@ -884,7 +947,8 @@ static void bmc_task_loop (void *data)
 					}
 					fl = tip_flash_get_spi_flash (spi);
 
-					if (offset + size > fl->state->device_size) {
+					if ((offset >= fl->state->device_size) ||
+							(size > fl->state->device_size - offset)) {
 						platform_printf (KRED "error end addr %#010lx out of flash (size=%#010lx)" NEWLINE KNRM,
 							offset + size, fl->state->device_size);
 						status = FLASH_ADDRESS_OUT_OF_RANGE;
@@ -953,17 +1017,17 @@ static void bmc_task_loop (void *data)
 				}
 
 				case BMC_DIRECT_COMMAND_FW_UPDATE: {
-uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
-				uint32_t dst_addr = TIP_VIRTUAL_FLASH_BASE_ADDR;
-				uint32_t size = REG_READ (FLASH_PRM3_SCR);
+					uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
+					uint32_t size = REG_READ (FLASH_PRM3_SCR);
 
-					/* copy to secured staging area */
-					platform_printf (KGRN
-						"FW UPDATE: copy %#010lx to %#010lx size %#010lx" NEWLINE KNRM,
-						src_addr, dst_addr, size);
-					memcpy ((void *) dst_addr, (void *) src_addr, size);
+					if (!bmc_direct_range_valid (src_addr, size) || (size > ROT_STAGING_SIZE)) {
+						tip_bmc_direct_finalize_command (CMD_CHANNEL_INVALID_ARGUMENT,
+							BMC_DIRECT_NOTIFCATION_FL);
+						break;
+					}
 
-					status = cerberus_update.base.start_update (&cerberus_update.base);
+					status = tip_fw_update_task_stage_and_start (&cerberus_update,
+						(const uint8_t *) src_addr, size);
 					tip_bmc_direct_finalize_command (status, BMC_DIRECT_NOTIFCATION_FL);
 					break;
 				}
@@ -977,11 +1041,11 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 						"DRBG: create %#010lx rand bytes at %#010lx" NEWLINE KNRM,
 						num_of_random_bytes, addr);
 
-					if ((addr < 96 * _1MB_) || ((addr + num_of_random_bytes) >= SDRAM_MAPPED_SIZE)) {
+					if (!bmc_direct_range_valid (addr, num_of_random_bytes)) {
 						platform_printf (KRED
 						"ERROR DRBG: create %#010lx rand bytes at %#010lx out of range"
 							NEWLINE KNRM, num_of_random_bytes, addr);
-						status = RNG_ENGINE_NO_MEMORY;
+						status = CMD_CHANNEL_INVALID_ARGUMENT;
 					}
 					else {
 						status = system_rng.base.generate_random_buffer (&(system_rng.base), num_of_random_bytes, (uint8_t *)addr);
@@ -1018,19 +1082,12 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 					 * Offset 4-length+4  IV/Key data
 					 */
 
-					struct info {
-						uint32_t size;
-						uint32_t arr;
-					};
-	
 					uint32_t addr_src = REG_READ (AES_BLOCK_ADDR_SCR);
 					uint32_t addr_dst = REG_READ (AES_OUTPUT_ADDR_SCR);
 					uint32_t size = REG_READ (AES_BLOCK_SIZE_SCR);
-
-					struct info *iv_info = (struct info *)REG_READ (AES_IV_INFO_SCR);
-					struct info *key_info = (struct info *)REG_READ (AES_KEY_INFO_SCR);
-					struct info *tag_info = (struct info *)REG_READ (AES_TAG_INFO_SCR);
-					
+					uint32_t iv_info = REG_READ (AES_IV_INFO_SCR);
+					uint32_t key_info = REG_READ (AES_KEY_INFO_SCR);
+					uint32_t tag_info = REG_READ (AES_TAG_INFO_SCR);
 					uint8_t *iv = NULL;
 					uint32_t iv_size = 0;
 					uint8_t *key = NULL;
@@ -1038,19 +1095,14 @@ uint32_t src_addr = REG_READ (FLASH_PRM1_SCR);
 					uint8_t *tag = NULL;
 					uint32_t tag_size = 0;
 
-					if (iv_info != NULL) {
-						iv = (uint8_t *)&iv_info->arr;
-						iv_size = iv_info->size & 0x00007FF;
-					}
-
-					if (key_info != NULL) {
-						key = (uint8_t *)&key_info->arr;
-						key_size = key_info->size & 0x00007FF;
-					}
-
-					if (tag_info != NULL) {
-						tag = (uint8_t *)&tag_info->arr;
-						tag_size = tag_info->size & 0x00007FF;
+					if (!bmc_direct_range_valid (addr_src, size) ||
+						!bmc_direct_range_valid (addr_dst, size) ||
+						!bmc_direct_aes_info_valid (iv_info, &iv, &iv_size, true,
+							(mode == NCL_AES_MODE_ECB) ? 0 : 16) ||
+						!bmc_direct_aes_info_valid (key_info, &key, &key_size, true, 0) ||
+						!bmc_direct_aes_info_valid (tag_info, &tag, &tag_size, false, 0)) {
+						status = CMD_CHANNEL_INVALID_ARGUMENT;
+						goto bmc_direct_fin;
 					}
 
 					platform_printf ( "scrpad24 %#010lx %#010lx \n", REG_ADDR (AES_BLOCK_ADDR_SCR),  REG_READ(AES_BLOCK_ADDR_SCR));

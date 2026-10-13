@@ -1,9 +1,28 @@
-TBD:
+0.9.0 L0 0.7.9 L1
 =================
+- Security fix: validate all BMC-supplied buffer pointers/lengths against the BMC DDR window
+  before use in BMC_DIRECT_COMMAND_FL_READ, FL_PROG, FL_ERASE_SECTOR, FW_UPDATE, DRBG, and AES
+  ENC/DEC, closing an arbitrary read/write into TIP memory from a compromised or malicious BMC
+  (also fixes an integer-overflow bug in the existing DRBG range check)
+- Add Infineon SFL064LIF115 SPI flash support (core/flash: flash_common.h, spi_flash.c,
+  spi_flash_sfdp.c; Nuvoton-Israel/npcm8xx-tip-fw-project-cerberus PR #4, merged 2026-10-08)
+- Built from main_nuvoton; does not include the Composite EAT component delivered in 0.8.9 L0
+  0.7.8 L1 below -- that work remains on its own branch pending a separate merge decision
+
+0.8.9 L0 0.7.8 L1
+=================
+- Composite EAT: add BMC/TIP evidence adapters, TCG concise evidence support, a strict request
+  decoder, a streaming token generator, TIP signing integration, and BMC_DIRECT transport wiring
+  for a composite attestation token flow between BMC and TIP; vendor the QCBOR dependency; add
+  standalone and BMC/TIP integration test coverage
 - Fix tip_ecc_hw_ncl_engine_ecdsa_sign to return actual NCL status instead of hardcoded NCL_STATUS_OK
 - Fix tip_ecc_hw_ncl_engine_ecdsa_verify: replace NCL_STATUS_RET_CHECK_MUTEX with hardened pattern
   (positive equality checks on both ret and sigOk, anti-glitch re-verify) to prevent glitch-induced
   false-positive verification when ROM returns ret=0 (NCL_STATUS_OK_Z1)
+- Add W25Q01RV QER=6 support for JESD216C+ compliance, and remove a duplicate W25Q_DTR handling
+  block left over in the QER=4 case (Nuvoton-Israel/npcm8xx-tip-fw-project-cerberus PR #2 and #3,
+  merged 2026-08-10)
+- Branched off TIP_FW_0.8.8_L0_0.7.7_L1; delivered internally, not tagged on GitHub
 
 0.8.8 L0 0.7.7 L1
 =================

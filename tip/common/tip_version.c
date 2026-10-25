@@ -288,7 +288,11 @@ int tip_version_set_in_OTP (struct tip_version_handler *ver)
 		 * program*/
 		if (next_minimal_version <= current_fw_version &&
 			next_minimal_version > minimal_version_in_OTP) {
+#if TIP_DUMMY_OTP_ON_RAM
+			platform_printf ("dummy write to RAM3: %#010lx to address %d\n", next_minimal_version, address);
+#elif FUSE_OTP
 			platform_printf ("will program %#010lx to address %d\n", next_minimal_version, address);
+#endif
 #if FUSE_OTP || TIP_DUMMY_OTP_ON_RAM
 			/* enable FCFG to fuse to OTP */
 			uint8_t block = FUSE_WRPR_PROP_BLOCK_ADDR (address);

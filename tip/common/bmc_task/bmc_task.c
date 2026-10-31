@@ -1357,7 +1357,7 @@ void bmc_export_data (void)
 
 	/* A1 */
 	if (chip_revision == 0x04) {
-		SEC_DME_DICE_T_A1 *dice_a1 = (SEC_DME_DICE_T_A1 *) &dme_dice;
+		SEC_DME_DICE_T_A1 *dice_a1 = (SEC_DME_DICE_T_A1 *) dme_dice;
 
 		platform_printf ("export dme_nonce at %#010lx %dB" NEWLINE, mailbox,
 			sizeof (dice_a1->dme_nonce));

@@ -283,6 +283,8 @@ int tip_version_set_in_OTP (struct tip_version_handler *ver)
 			 default:
       			  break;
 		}
+		/* only read when FUSE_OTP or TIP_DUMMY_OTP_ON_RAM is set */
+		(void) address;
 
 		/*if the next OTP version number is greater than the version of currently running image , do not
 		 * program*/

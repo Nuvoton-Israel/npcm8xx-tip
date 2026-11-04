@@ -2055,6 +2055,7 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	};
 
 	int status;
+	int measurement_status = 0;
 
 	status = pcr_store_init (&pcr_storage, pcr_config, ARRAY_SIZE (pcr_config));
 	if (status != 0) {
@@ -2192,6 +2193,9 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	if (status != 0) {
 		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
 			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_BOOT_IMG, status);
+		if (measurement_status == 0) {
+			measurement_status = status;
+		}
 	}
 
 	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
@@ -2200,6 +2204,9 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	if (status != 0) {
 		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
 			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_APP_IMG, status);
+		if (measurement_status == 0) {
+			measurement_status = status;
+		}
 	}
 
 	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
@@ -2208,6 +2215,9 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	if (status != 0) {
 		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
 			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_FW_VERSION, status);
+		if (measurement_status == 0) {
+			measurement_status = status;
+		}
 	}
 
 	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
@@ -2216,6 +2226,9 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	if (status != 0) {
 		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
 			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_KMT_IMG, status);
+		if (measurement_status == 0) {
+			measurement_status = status;
+		}
 	}
 
 	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
@@ -2224,6 +2237,9 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	if (status != 0) {
 		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
 			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_SKMT_IMG, status);
+		if (measurement_status == 0) {
+			measurement_status = status;
+		}
 	}
 
 	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
@@ -2232,6 +2248,9 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	if (status != 0) {
 		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
 			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_BB_IMG, status);
+		if (measurement_status == 0) {
+			measurement_status = status;
+		}
 	}
 
 	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
@@ -2240,6 +2259,9 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	if (status != 0) {
 		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
 			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_BL31_IMG, status);
+		if (measurement_status == 0) {
+			measurement_status = status;
+		}
 	}
 
 	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
@@ -2248,6 +2270,9 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	if (status != 0) {
 		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
 			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_OPTEE_IMG, status);
+		if (measurement_status == 0) {
+			measurement_status = status;
+		}
 	}
 
 	status = pcr_store_update_versioned_buffer (&pcr_storage, hash,
@@ -2256,9 +2281,12 @@ static int initialize_cerberus_attestation (struct hash_engine *hash)
 	if (status != 0) {
 		debug_log_create_entry (DEBUG_LOG_SEVERITY_ERROR, DEBUG_LOG_COMPONENT_INIT,
 			INIT_LOGGING_PCR_STORE_UPDATE_BUFFER, PCR_MEASUREMENT_TYPE_PLATFORM_UBOOT_IMG, status);
+		if (measurement_status == 0) {
+			measurement_status = status;
+		}
 	}
 
-	return 0;
+	return measurement_status;
 }
 
 /**

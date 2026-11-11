@@ -1,4 +1,4 @@
-TBD:
+0.9.1 L0 0.8.0 L1
 =================
 - OTP: version-write log now prints "dummy write to RAM3" when TIP_DUMMY_OTP_ON_RAM is set and
   "will program" only when FUSE_OTP is set; nothing is printed when both are off (logging only,
@@ -11,6 +11,11 @@ TBD:
 - initialize_cerberus_attestation now returns the first failed PCR measurement update instead of
   always 0. cerberus_init treats it as fatal, so a failed measurement now resets TIP
   (INIT_LOGGING_PCR_STORE) and bmc_export_data does not run on that boot
+- Cerberus core (core-igps, npcm8xx-tip-fw-project-cerberus): support flash devices of 16MB or
+  smaller that support 4-byte address mode (spi_flash.c; commit 19d90da7)
+- Cerberus core (core-igps): fix the QER switch/case flow in spi_flash_sfdp.c; Winbond W25Q devices
+  that incorrectly report QER value 6 are now handled instead of returning an unknown quad-enable
+  result (commit 40a94de2)
 
 0.9.0 L0 0.7.9 L1
 =================

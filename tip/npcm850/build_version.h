@@ -13,8 +13,8 @@
 
 /* L1 Version number components. */
 #define	FW_VERSION_MAJOR			0
-#define	FW_VERSION_MINOR			7
-#define	FW_VERSION_BUILD			9
+#define	FW_VERSION_MINOR			8
+#define	FW_VERSION_BUILD			0
 
 /* String macros to convert version number. */
 #define	FW_STRING(x)				#x
